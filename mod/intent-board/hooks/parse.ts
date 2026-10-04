@@ -82,6 +82,8 @@ export const lastExchange = (messages: readonly Msg[]): Exchange | null => {
   // ツールの結果だけを運ぶ user メッセージは発言ではない
   while (i >= 0 && !(messages[i]!.role === 'user' && messages[i]!.text.trim() && !messages[i]!.toolResults)) i--
   if (i < 0) return null
+  // スラッシュコマンド（/loop の再開を含む）は発言として読まない
+  if (/^\s*(\/|<command-)/.test(messages[i]!.text)) return null
   const after = messages.slice(i + 1).filter(m => m.role === 'assistant')
   return {
     user: messages[i]!.text,
