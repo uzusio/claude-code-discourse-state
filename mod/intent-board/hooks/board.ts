@@ -43,10 +43,10 @@ export const bandLine = (b: Board, width = 60) => {
 // 上から：
 //   1. 意図の読み … ユーザーの言葉（引用）と Claude の読み、いま扱っている問い
 //   2. 流れ       … 手順ごとに「なぜこの手順か」と、どの意図から出たか。
-//                    言われていない前提に乗っている手順には、その前提を黄色で添える
+//                    文脈の補完（ユーザーが言っていない前提）に乗っている手順には、それを黄色で添える
 //   3. あなたが決めること
-//   4. 履歴（決まったこと・補った前提・置き換わったこと）… 参照用。たたんでおく
-// 補った前提は読みがずれる原因の1つとして黄色で管理するが、中心には置かない。
+//   4. 履歴（決まったこと・文脈の補完・置き換わったこと）… 参照用。たたんでおく
+// 文脈の補完は読みがずれる原因の1つとして黄色で管理するが、中心には置かない。
 // id（C12 など）は人が使わないので出さない。
 
 export type Item = { key: string; text: string; sub?: string[]; tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' }
@@ -76,7 +76,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
       ? [
           ...b.goal.quote.map((q, i) => ({ key: `quote:${i}`, text: `「${q}」`, tone: 'quote' as const })),
           { key: 'reading', text: b.goal.reading, tone: 'strong' as const },
-          ...(focus ? [{ key: 'focus', text: `いま扱っている問い：${focus.question}`, tone: 'dim' as const }] : []),
+          ...(focus ? [{ key: 'focus', text: `いま扱っている問い：${focus.question}` }] : []),
         ]
       : [{ key: 'reading-none', text: 'まだ読めていない', tone: 'dim' as const }],
   })
@@ -94,7 +94,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
         const sub = [
           ...(st.why ? [st.why] : []),
           ...(basis.length ? [`← ${basis.join('・')}`] : []),
-          ...premises.map(c => `言われていない前提：${c!.content}${c!.reason ? `（${c!.reason}）` : ''}`),
+          ...premises.map(c => `文脈の補完：${c!.content}${c!.reason ? `（${c!.reason}）` : ''}`),
         ]
         return { key: `p:${i}`, text: `${i + 1}. ${st.text}`, sub }
       }),
@@ -102,7 +102,8 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
   }
 
   // 3. あなたが決めること
-  const mine = b.open.filter(q => q.owner === 'user')
+  // 決めごとは、子の問いを持たない（＝話題そのものではない）ユーザーの問いだけ
+  const mine = b.open.filter(q => q.owner === 'user' && !b.tree.nodes.some(n => n.parent === q.id))
   if (mine.length)
     out.push({ key: 'mine', title: `あなたが決めること（${mine.length}）`, items: mine.map(q => ({ key: `q:${q.id}`, text: q.question })) })
 
@@ -131,7 +132,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
     const fresh = b.supplemented.filter(isNew).length
     out.push({
       key: 'supplemented',
-      title: `補った前提（${b.supplemented.length}${fresh ? `・うち新しく ${fresh}` : ''}）`,
+      title: `文脈の補完（${b.supplemented.length}${fresh ? `・うち新しく ${fresh}` : ''}）`,
       tone: 'supplemented',
       collapsible: { open },
       items: open

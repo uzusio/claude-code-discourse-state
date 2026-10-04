@@ -158,19 +158,18 @@ export const register: Register = on => {
 
     const { Box, Text, Button } = $.ui.resolve(e)
     // 1段目：意図の読み（2行まで折り返し、超えた分は切る。全角は2桁）
-    // 2段目：流れの次の一歩。補った前提の数は黄色で小さく添えるだけ
+    // 2段目：流れの次の一歩
     const line = bandLine(board, Math.max(20, 2 * ((e.props.bodyColumns ?? 80) - 2) - 6))
     const step = nextStep(board)
     const tail = [changed ? '更新あり' : '', note ?? ''].filter(Boolean).join(' ｜ ')
 
     return (
       <Box flexDirection="column">
-        <Text wrap="wrap">意図：{line.goal}</Text>
+        <Text wrap="wrap" color="white">意図：{line.goal}</Text>
         <Box>
           <Box flexShrink={1}>
             <Text dimColor wrap="truncate-end">{step ?? '流れ：まだ無い'}</Text>
           </Box>
-          {line.supplemented > 0 ? <Text key="supplemented" color={SUPPLEMENTED}> ｜ 補った前提 {line.supplemented}</Text> : null}
           <Text dimColor>{tail ? ` ｜ ${tail}` : ''}  </Text>
           <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
         </Box>
@@ -200,12 +199,12 @@ export const register: Register = on => {
             <Text color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.tone === 'new' ? '新 ' : '・'}</Text>
           )}
           <Box flexShrink={1}>
-            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone)} dimColor={it.tone === 'dim' || it.tone === 'quote'}>{it.text}</Text>
+            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone) ?? (it.tone === 'dim' || it.tone === 'quote' ? undefined : 'white')} dimColor={it.tone === 'dim' || it.tone === 'quote'}>{it.text}</Text>
           </Box>
         </Box>
         {(it.sub ?? []).map((line, i) => (
           <Box key={`${it.key}:${i}`} paddingLeft={2}>
-            <Text wrap="wrap" color={line.startsWith('言われていない前提') ? SUPPLEMENTED : undefined} dimColor={!line.startsWith('言われていない前提')}>{line}</Text>
+            <Text wrap="wrap" color={line.startsWith('文脈の補完') ? SUPPLEMENTED : undefined} dimColor={!line.startsWith('文脈の補完')}>{line}</Text>
           </Box>
         ))}
       </Box>
@@ -216,8 +215,8 @@ export const register: Register = on => {
         {sections(board, flipped).map(sec => (
           <Box key={sec.key} flexDirection="column" marginBottom={1}>
             {sec.collapsible
-              ? <Button key={`h:${sec.key}`} plain dimColor={sec.tone === 'dim'} label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
-              : <Text bold color={color(sec.tone)}>{sec.title}</Text>}
+              ? <Button key={`h:${sec.key}`} plain label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
+              : <Text bold color={sec.tone === 'supplemented' ? SUPPLEMENTED : 'white'}>{sec.title}</Text>}
             {sec.items.map(it => item(it, 1))}
             {(sec.groups ?? []).map(g => (
               <Box key={g.key} flexDirection="column" paddingLeft={1} marginTop={1}>

@@ -55,13 +55,13 @@ test('ペイン：意図の読み → 流れ → あなたが決めること を
   expect(step2.sub).toEqual([
     'ルールで拾えない違和感を、ユーザーの代わりに見る（目的の中心）',
     '← 目的・「最後にトップのエージェントが全カードを読む」',
-    '言われていない前提：規準監査の結果を見る前に読む（結果に判断を引っぱられないため）',
-    '言われていない前提：読むのは Claude 本人（「トップのエージェント」から。別エージェントの可能性は検討していない）',
+    '文脈の補完：規準監査の結果を見る前に読む（結果に判断を引っぱられないため）',
+    '文脈の補完：読むのは Claude 本人（「トップのエージェント」から。別エージェントの可能性は検討していない）',
   ])
 
-  expect(byKey([]).get('mine')!.items.map(i => i.text)).toEqual(['通知先はどこか', '監査ジョブをどう組むか'])
+  expect(byKey([]).get('mine')!.items.map(i => i.text)).toEqual(['通知先はどこか'])  // 子の問いを持つ『監査ジョブをどう組むか』は話題なので出さない
   // 履歴は既定でたたむ。補った前提は見出しに新しい件数を出す
-  expect(byKey([]).get('supplemented')!.title).toBe('補った前提（3・うち新しく 1）')
+  expect(byKey([]).get('supplemented')!.title).toBe('文脈の補完（3・うち新しく 1）')
   expect(byKey([]).get('supplemented')!.items).toEqual([])
   expect(byKey(['supplemented']).get('supplemented')!.items[0]!.text).toBe('新 通知は 4時50分に送る')
   expect(byKey(['decided']).get('decided')!.groups!.map(g => g.title)).toEqual(['監査ジョブをどう組むか'])
