@@ -11,17 +11,28 @@ const PANE = 'intent-board'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
 const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null } as Seen)
+// ペインが開いているか。帯のボタンの表示（開く／閉じる）を切り替える
+const opened = atom({ plugin: 'intent-board', key: 'opened' } as const, false)
 
 const MODEL = 'sonnet'
 const JUDGE_MODEL = 'haiku'
 
 let dir: string | null = null
-let isOpen = false
 
 // Esc で閉じる。入力欄の上に出るときは高さを抑える
 async function openPane($: EngineInterface) {
   await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, rows: 14 })
-  isOpen = true
+  await update($, opened, () => true)
+}
+
+async function closePane($: EngineInterface) {
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  await update($, opened, () => false)
+}
+
+async function togglePane($: EngineInterface) {
+  if (await read($, opened)) await closePane($)
+  else await openPane($)
 }
 
 async function boardDir($: EngineInterface) {
@@ -104,25 +115,24 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'intent-board', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
     // 読み込み直しのたびに閉じた状態から始める（開きっぱなしで入力欄の上を塞がない）
-    await $.ui.close({ id: PANE }).catch(() => undefined)
-    isOpen = false
+    await closePane($)
     await load($)
     return next(e)
   })
 
   // /intent-board は開く・閉じるの切り替え
   on('command.run', { command: 'intent-board' }, async $ => {
-    if (isOpen) {
-      await $.ui.close({ id: PANE })
+    if (await read($, opened)) {
+      await closePane($)
       return { text: '意図ボードを閉じた' }
     }
     await load($)
     await openPane($)
-    return { text: '意図ボードを開いた（Esc か /intent-board で閉じる）' }
+    return { text: '意図ボードを開いた（帯のボタン・Esc・/intent-board で閉じる）' }
   })
 
   on('ui.close', async ($, e, next) => {
-    if (e.id === PANE) isOpen = false
+    if (e.id === PANE) await update($, opened, () => false)
     return next(e)
   })
 
@@ -138,6 +148,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const { board, changed, note } = await read($, seen)
+    const isOpen = await read($, opened)
     if (e.props.hasSurvey || board === null) {
       return next(e)
     }
@@ -154,7 +165,7 @@ export const register: Register = on => {
             補った前提 {line.supplemented}件
           </Text>
           <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}{note ? ` ｜ ${note}` : ''}  </Text>
-          <Button key="open" label="ボードを開く" onPress={() => void openPane($)} />
+          <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
         </Box>
       </Box>
     )

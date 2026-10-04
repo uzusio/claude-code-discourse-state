@@ -17,6 +17,6 @@ export type Seen = { board: Board | null; changed: boolean; note: string | null 
 
 declare module 'claude-code' {
   interface PluginState {
-    'intent-board': { seen: Seen }
+    'intent-board': { seen: Seen; opened: boolean }
   }
 }
