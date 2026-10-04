@@ -8,9 +8,10 @@ state（JSON）:
   {"session": str, "turn": int,
    "goal":        {"quote": [str, ...], "reading": str, "source": "π1"} | None,       # 問いの木の根（ボード①）
    "questions":   [{"id": "Q0", "question": str, "opened_by": "π1", "answers": ["C2", ...],
-                    "parent": "Q0" | None, "owner": "user" | "claude"}, ...],          # 末尾が最上位（⑥）
+                    "parent": "Q0" | None, "owner": "user" | "claude", "closed": bool}, ...],  # 末尾が最上位（⑥）
+                                                                                     # 片付いた問いも消さずに残す（QUD の木）
    "commitments": [{"id": "C2", "content": str, "source": "π2", "depends_on": ["C1", ...],
-                    "by": "user" | "claude", "reason": str?}, ...],                   # by=user が②、by=claude が④
+                    "by": "user" | "claude", "reason": str?, "turn": int}, ...],      # by=user が②、by=claude が④
    "retracted":   [{"id": "C1", "content": str, "turn": 3, "source": "π3", "replaced_by": "C3" | None}, ...],  # ③
    "steps":       [{"text": str, "from": ["goal", "C2", ...]}, ...],                  # ⑤ 意図→いまの手順
    "counters": {"C": 3, "Q": 0}}                                                     # 採番用
@@ -31,7 +32,7 @@ ops の種類:
   amend    コミットメントの内容を書き直す (id, content)  ← Elaboration 用。content は書き直し後の全文
   recheck  依存先が消えたものを見直した、という宣言。状態は変えない (id, note?)
   open     問いを積む                     (id, question, parent?, owner?)  ← owner は決める人（既定 user）
-  answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを降ろす
+  answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
   goal     目的を置く・置き換える         (quote, reading)  ← quote はユーザーの言葉の引用、reading はその読み
   plan     手順を置き換える               (steps: [{text, from}])  ← from は "goal" かコミットメントの id
   none     何もしない                     （Acknowledge 用）
@@ -232,7 +233,8 @@ def apply(state: dict, diff: dict) -> dict:
         kind = op["op"]
         if kind == "add":
             c = {"id": op["id"], "content": op["content"], "source": src,
-                 "depends_on": list(op.get("depends_on", []) or []), "by": op.get("by", "user")}
+                 "depends_on": list(op.get("depends_on", []) or []), "by": op.get("by", "user"),
+                 "turn": new["turn"]}
             if c["by"] == "claude":
                 c["reason"] = op["reason"]
             new["commitments"].append(c)
@@ -263,7 +265,7 @@ def apply(state: dict, diff: dict) -> dict:
             pass  # 宣言だけ。意味を変えるなら amend を使う
         elif kind == "open":
             new["questions"].append({"id": op["id"], "question": op["question"], "opened_by": src, "answers": [],
-                                     "parent": op.get("parent"), "owner": op.get("owner", "user")})
+                                     "parent": op.get("parent"), "owner": op.get("owner", "user"), "closed": False})
             _bump(new["counters"], op["id"])
         elif kind == "answer":
             q = _find(new["questions"], op["question"])
@@ -273,7 +275,7 @@ def apply(state: dict, diff: dict) -> dict:
             if by and by not in q["answers"]:
                 q["answers"].append(by)
             if op.get("complete"):
-                new["questions"] = [x for x in new["questions"] if x["id"] != q["id"]]
+                q["closed"] = True
         elif kind == "goal":
             new["goal"] = {"quote": list(op["quote"]), "reading": op["reading"], "source": src}
         elif kind == "plan":
@@ -300,13 +302,19 @@ def replay(diffs: Iterable[dict], session: str, strict: bool = True) -> dict:
 def render(state: dict) -> str:
     """LLM に渡す文面。ここに無い決定・問いは存在しない、と読ませる。"""
     lines = ["## 現在の状態（コードが差分ログから導出。ここに無い決定・問いは存在しない）"]
+    open_qs = [q for q in state["questions"] if not q.get("closed")]
+    closed_qs = [q for q in state["questions"] if q.get("closed")]
     lines.append("### 開いている問い（上が最上位）")
-    if state["questions"]:
-        for q in reversed(state["questions"]):
+    if open_qs:
+        for q in reversed(open_qs):
             ans = f"  回答: {', '.join(q['answers'])}" if q.get("answers") else "  回答: なし"
             lines.append(f"- {q['id']}: {q['question']}{ans}")
     else:
         lines.append("- なし")
+    if closed_qs:
+        lines.append("### 片付いた問い")
+        for q in closed_qs:
+            lines.append(f"- {q['id']}: {q['question']}")
     lines.append("### 有効なコミットメント")
     if state["commitments"]:
         for c in state["commitments"]:
@@ -326,7 +334,7 @@ def board(state: dict, recent: int = 3) -> dict:
     ② と ④ は同じコミットメントの by で分けるので、同じ中身が両方に載ることはない。
     """
     def item(c: dict) -> dict:
-        out = {"id": c["id"], "content": c["content"], "source": c.get("source")}
+        out = {"id": c["id"], "content": c["content"], "source": c.get("source"), "turn": c.get("turn", 0)}
         if c.get("reason"):
             out["reason"] = c["reason"]
         return out
@@ -340,8 +348,41 @@ def board(state: dict, recent: int = 3) -> dict:
         "supplemented": [item(c) for c in state["commitments"] if c.get("by") == "claude"],   # ④
         "steps": [dict(st) for st in state.get("steps", [])],                                 # ⑤
         "open": [{"id": q["id"], "question": q["question"], "owner": q.get("owner", "user"),
-                  "parent": q.get("parent")} for q in reversed(state["questions"])],          # ⑥
+                  "parent": q.get("parent")} for q in reversed(state["questions"])
+                 if not q.get("closed")],                                                    # ⑥
+        "tree": tree(state),
     }
+
+
+def tree(state: dict) -> dict:
+    """目的 → 問い → 決定 の木（QUD の木）。
+
+    決定は、答えている問いにぶら下げる。答えていない決定は、依存先がぶら下がっている問いに付ける。
+    どこにも付かない決定は loose（目的の直下）。問いの並びは開いた順。
+    """
+    attach: dict[str, str] = {}
+    for q in state["questions"]:
+        for a in q.get("answers", []):
+            attach.setdefault(a, q["id"])
+    changed = True
+    while changed:
+        changed = False
+        for c in state["commitments"]:
+            if c["id"] in attach:
+                continue
+            for d in c.get("depends_on", []):
+                if d in attach:
+                    attach[c["id"]] = attach[d]
+                    changed = True
+                    break
+    qids = {q["id"] for q in state["questions"]}
+    nodes = [{"id": q["id"], "question": q["question"], "owner": q.get("owner", "user"),
+              "closed": bool(q.get("closed")),
+              "parent": q.get("parent") if q.get("parent") in qids else None,
+              "items": [c["id"] for c in state["commitments"] if attach.get(c["id"]) == q["id"]]}
+             for q in state["questions"]]
+    loose = [c["id"] for c in state["commitments"] if c["id"] not in attach]
+    return {"nodes": nodes, "loose": loose}
 
 
 # ---------------------------------------------------------------- ファイル入出力（薄い。純粋関数ではないので末尾に隔離）

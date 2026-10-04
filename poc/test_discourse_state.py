@@ -146,7 +146,8 @@ class Misc(unittest.TestCase):
         self.assertEqual(validate(s, d), [])
         s2 = apply(s, d)
         self.assertEqual(s2["commitments"][1]["content"], "Bを含める（β版から）")
-        self.assertEqual(s2["questions"], [], "complete で問いが降りる")
+        self.assertTrue(s2["questions"][0]["closed"], "complete で問いが閉じる（消さない）")
+        self.assertEqual(board(s2)["open"], [], "閉じた問いは開いている問いに出ない")
 
     def test_render_shape(self):
         out = render(apply(after_pi2(), D3_CORRECT))
@@ -157,6 +158,31 @@ class Misc(unittest.TestCase):
 
 
 AUDIT_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "audit_job.jsonl")
+
+
+class Tree(unittest.TestCase):
+    def setUp(self):
+        self.state = replay(read_diffs(AUDIT_JOB), "audit")
+        self.tree = board(self.state)["tree"]
+
+    def test_commitments_hang_under_questions(self):
+        nodes = {n["id"]: n for n in self.tree["nodes"]}
+        self.assertEqual(nodes["Q0"]["items"], ["C0", "C1", "C5"])
+        self.assertEqual(nodes["Q1"]["parent"], "Q0")
+        self.assertEqual(self.tree["loose"], ["C3", "C4"], "どの問いにも答えていない補った前提は目的の直下")
+
+    def test_dependents_follow_their_dependency(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Elaboration",
+             "ops": [{"op": "add", "id": "C6", "content": "5時の前に通知", "depends_on": ["C5"]}]}
+        nodes = {n["id"]: n for n in board(apply(self.state, d))["tree"]["nodes"]}
+        self.assertIn("C6", nodes["Q0"]["items"])
+
+    def test_closed_question_keeps_its_branch(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Answer",
+             "ops": [{"op": "answer", "question": "Q0", "complete": True}]}
+        nodes = {n["id"]: n for n in board(apply(self.state, d))["tree"]["nodes"]}
+        self.assertTrue(nodes["Q0"]["closed"])
+        self.assertEqual(nodes["Q0"]["items"], ["C0", "C1", "C5"])
 
 
 class IntentBoard(unittest.TestCase):

@@ -163,17 +163,20 @@ export const AUDIT_BOARD = {
     {
       "id": "C0",
       "content": "最後にトップのエージェントが全カードを読む",
-      "source": "π1"
+      "source": "π1",
+      "turn": 1
     },
     {
       "id": "C1",
       "content": "監査はユーザーが指示したときだけ",
-      "source": "π2"
+      "source": "π2",
+      "turn": 2
     },
     {
       "id": "C5",
       "content": "実行は 10/5 5時ごろ（日付が変わっていたのを見落としていた）",
-      "source": "π3"
+      "source": "π3",
+      "turn": 3
     }
   ],
   "replaced": [
@@ -190,12 +193,14 @@ export const AUDIT_BOARD = {
       "id": "C3",
       "content": "規準監査の結果を見る前に読む",
       "source": "σ2",
+      "turn": 2,
       "reason": "結果に判断を引っぱられないため"
     },
     {
       "id": "C4",
       "content": "読むのは Claude 本人",
       "source": "σ2",
+      "turn": 2,
       "reason": "「トップのエージェント」から。別エージェントの可能性は検討していない"
     }
   ],
@@ -235,5 +240,33 @@ export const AUDIT_BOARD = {
       "owner": "user",
       "parent": null
     }
-  ]
+  ],
+  "tree": {
+    "nodes": [
+      {
+        "id": "Q0",
+        "question": "監査ジョブをどう組むか",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": [
+          "C0",
+          "C1",
+          "C5"
+        ]
+      },
+      {
+        "id": "Q1",
+        "question": "監査をどの範囲にかけるか",
+        "owner": "claude",
+        "closed": false,
+        "parent": "Q0",
+        "items": []
+      }
+    ],
+    "loose": [
+      "C3",
+      "C4"
+    ]
+  }
 }

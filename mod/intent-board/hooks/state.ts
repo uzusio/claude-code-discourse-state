@@ -5,10 +5,11 @@ import type { Board } from '../types'
 export type By = 'user' | 'claude'
 export type Commitment = {
   id: string; content: string; source: string | null; depends_on: string[]; by: By
-  reason?: string; confirmed_by?: string | null
+  reason?: string; confirmed_by?: string | null; turn: number
 }
 export type Question = {
   id: string; question: string; opened_by: string | null; answers: string[]; parent: string | null; owner: By
+  closed: boolean  // 片付いた問いも消さずに残す（QUD の木）
 }
 export type State = {
   session: string; turn: number
@@ -138,7 +139,7 @@ export const apply = (state: State, diff: Diff): State => {
   for (const op of diff.ops ?? []) {
     switch (op.op) {
       case 'add': {
-        const c: Commitment = { id: op.id, content: op.content, source: src, depends_on: [...(op.depends_on ?? [])], by: op.by ?? 'user' }
+        const c: Commitment = { id: op.id, content: op.content, source: src, depends_on: [...(op.depends_on ?? [])], by: op.by ?? 'user', turn: s.turn }
         if (c.by === 'claude') c.reason = op.reason
         s.commitments.push(c)
         bump(s.counters, op.id)
@@ -165,14 +166,14 @@ export const apply = (state: State, diff: Diff): State => {
         break
       }
       case 'open':
-        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user' })
+        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user', closed: false })
         bump(s.counters, op.id)
         break
       case 'answer': {
         const q = find(s.questions, op.question)
         if (!q) break
         if (op.by && !q.answers.includes(op.by)) q.answers.push(op.by)
-        if (op.complete) s.questions = s.questions.filter(x => x.id !== q.id)
+        if (op.complete) q.closed = true
         break
       }
       case 'goal':
@@ -200,11 +201,17 @@ export const replay = (diffs: Diff[], session: string): State => {
 export const render = (s: State): string => {
   const lines = ['## 現在の状態（コードが差分ログから導出。ここに無い決定・問いは存在しない）']
   lines.push(s.goal ? `### 目的\n- 引用: ${s.goal.quote.map(q => `「${q}」`).join(' ')}\n- 読み: ${s.goal.reading}` : '### 目的\n- 未設定')
+  const openQs = s.questions.filter(q => !q.closed)
+  const closedQs = s.questions.filter(q => q.closed)
   lines.push('### 開いている問い（上が最上位）')
-  if (s.questions.length)
-    for (const q of [...s.questions].reverse())
+  if (openQs.length)
+    for (const q of [...openQs].reverse())
       lines.push(`- ${q.id}: ${q.question}  回答: ${q.answers.length ? q.answers.join(', ') : 'なし'}  決める人: ${q.owner}`)
   else lines.push('- なし')
+  if (closedQs.length) {
+    lines.push('### 片付いた問い')
+    for (const q of closedQs) lines.push(`- ${q.id}: ${q.question}`)
+  }
   lines.push('### 有効なコミットメント')
   if (s.commitments.length)
     for (const c of s.commitments)
@@ -219,7 +226,7 @@ export const render = (s: State): string => {
 }
 
 export const board = (s: State, recent = 3): Board => {
-  const item = (c: Commitment) => ({ id: c.id, content: c.content, source: c.source, ...(c.reason ? { reason: c.reason } : {}) })
+  const item = (c: Commitment) => ({ id: c.id, content: c.content, source: c.source, turn: c.turn ?? 0, ...(c.reason ? { reason: c.reason } : {}) })
   return {
     turn: s.turn,
     goal: s.goal,
@@ -227,6 +234,32 @@ export const board = (s: State, recent = 3): Board => {
     replaced: s.retracted.slice(-recent),
     supplemented: s.commitments.filter(c => c.by === 'claude').map(item),
     steps: s.steps.map(st => ({ ...st })),
-    open: [...s.questions].reverse().map(q => ({ id: q.id, question: q.question, owner: q.owner, parent: q.parent })),
+    open: [...s.questions].reverse().filter(q => !q.closed).map(q => ({ id: q.id, question: q.question, owner: q.owner, parent: q.parent })),
+    tree: tree(s),
+  }
+}
+
+// 目的 → 問い → 決定 の木（QUD の木）。決定は答えている問いに、答えていなければ依存先の問いに付ける。
+// どこにも付かない決定は loose（目的の直下）。問いの並びは開いた順
+export const tree = (s: State): Board['tree'] => {
+  const attach = new Map<string, string>()
+  for (const q of s.questions) for (const a of q.answers) if (!attach.has(a)) attach.set(a, q.id)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const c of s.commitments) {
+      if (attach.has(c.id)) continue
+      const d = c.depends_on.find(x => attach.has(x))
+      if (d !== undefined) { attach.set(c.id, attach.get(d)!); changed = true }
+    }
+  }
+  const qids = new Set(s.questions.map(q => q.id))
+  return {
+    nodes: s.questions.map(q => ({
+      id: q.id, question: q.question, owner: q.owner, closed: !!q.closed,
+      parent: q.parent && qids.has(q.parent) ? q.parent : null,
+      items: s.commitments.filter(c => attach.get(c.id) === q.id).map(c => c.id),
+    })),
+    loose: s.commitments.filter(c => !attach.has(c.id)).map(c => c.id),
   }
 }
