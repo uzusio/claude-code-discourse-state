@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="744" height="994" viewBox="0 0 744 994" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
+<rect width="744" height="994" rx="10" fill="#0d1117"/>
+<circle cx="26" cy="20" r="6" fill="#ff5f56"/><circle cx="46" cy="20" r="6" fill="#ffbd2e"/><circle cx="66" cy="20" r="6" fill="#27c93f"/>
+<text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">意図ボード（例のデータ）</text>
+<text x="20" y="50" fill="#58a6ff">[閉じる]</text>
+<text x="20" y="72" fill="#e6edf3" font-weight="bold">意図の読み</text>
+<text x="38" y="94" fill="#8b949e">「委任したトップのエージェントが最後に責任をもって全カードを読むべき」</text>
+<text x="38" y="116" fill="#8b949e">「これまで俺がずっと指摘してきたことを、最後にヒューリスティック診断でチェ</text>
+<text x="38" y="138" fill="#8b949e">ックしてほしい。俺の代わりになってほしい」</text>
+<text x="38" y="160" fill="#e6edf3" font-weight="bold">ルールでは拾えない「これおかしいだろ」を、ユーザーの代わりに拾って、責任を</text>
+<text x="38" y="182" fill="#e6edf3" font-weight="bold">もって納品判断する</text>
+<text x="38" y="204" fill="#e6edf3">・いま扱っている問い：監査の結果をどこに通知するか</text>
+
+<text x="20" y="248" fill="#f85149" font-weight="bold">監査の指摘（1）</text>
+<text x="38" y="270" fill="#f85149">・食い違い：流れでは規準監査が先なのに、結果を待たずにカードを読み始めてい</text>
+<text x="56" y="292" fill="#f85149">る</text>
+
+<text x="20" y="336" fill="#e6edf3" font-weight="bold">流れ</text>
+<text x="38" y="358" fill="#e6edf3">・1. 規準監査（sonnet）</text>
+<text x="56" y="380" fill="#8b949e">既存の監査の仕組みで、規準に照らした漏れを先に拾う</text>
+<text x="56" y="402" fill="#8b949e">← 「監査はユーザーが指示したときだけ」</text>
+<text x="38" y="424" fill="#e6edf3">・2. 結果を見る前に Claude が全カードを読む</text>
+<text x="56" y="446" fill="#8b949e">ルールで拾えない違和感を、ユーザーの代わりに見る（目的の中心）</text>
+<text x="56" y="468" fill="#8b949e">← 目的・「最後にトップのエージェントが全カードを読む」</text>
+<text x="56" y="490" fill="#e3b341">文脈の補完：規準監査の結果を見る前に読む（結果に判断を引っぱられないため）</text>
+<text x="56" y="512" fill="#e3b341">文脈の補完：読むのは Claude 本人（「トップのエージェント」から。別エージ</text>
+<text x="56" y="534" fill="#e3b341">ェントの可能性は検討していない）</text>
+<text x="38" y="556" fill="#e6edf3">・3. 直して再監査</text>
+<text x="56" y="578" fill="#8b949e">見つけたものを直して納品できる状態にする</text>
+<text x="56" y="600" fill="#8b949e">← 目的</text>
+
+<text x="20" y="644" fill="#e6edf3" font-weight="bold">あなたが決めること（1）</text>
+<text x="38" y="666" fill="#e6edf3">・監査の結果をどこに通知するか</text>
+
+<text x="20" y="710" fill="#e6edf3" font-weight="bold">▸ 決まったこと（3）</text>
+
+<text x="20" y="754" fill="#e3b341" font-weight="bold">▸ 文脈の補完（2）</text>
+
+<text x="20" y="798" fill="#e6edf3" font-weight="bold">▸ 置き換わったこと（1）</text>
+
+<line x1="20" y1="835" x2="724" y2="835" stroke="#30363d"/>
+<text x="20" y="864" fill="#e6edf3">意図：ルールでは拾えない「これおかしいだろ」を、ユーザーの代わりに拾って、責</text>
+<text x="20" y="886" fill="#e6edf3">任をもって納品判断する</text>
+<text x="20" y="908" fill="#8b949e">次：規準監査（sonnet）（ほか 2）   <tspan fill="#f85149">｜ 監査の指摘 1</tspan></text><text x="724" y="908" text-anchor="end" fill="#58a6ff">[ボードを閉じる]</text>
+<line x1="20" y1="923" x2="724" y2="923" stroke="#30363d"/>
+<text x="20" y="952" fill="#e6edf3">&gt; </text>
+</svg>
