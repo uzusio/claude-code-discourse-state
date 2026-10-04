@@ -13,7 +13,7 @@ export type Board = {
   open: OpenQuestion[]
 }
 // changed：直前のターンの終わりで、ボードの中身が変わったか
-export type Seen = { board: Board | null; changed: boolean }
+export type Seen = { board: Board | null; changed: boolean; note: string | null }
 
 declare module 'claude-code' {
   interface PluginState {

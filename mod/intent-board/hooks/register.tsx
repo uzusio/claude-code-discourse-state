@@ -3,26 +3,77 @@ import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Board, Seen } from '../types'
 import { bandLine, boardPath, parseBoard, who } from './board'
+import { buildPrompt, lastExchange, parseReply, SYSTEM } from './parse'
+import { apply, board, replay, validate } from './state'
+import type { Diff } from './state'
 
 const PANE = 'intent-board'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
-const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false } as Seen)
+const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null } as Seen)
 
-let path: string | null = null
-let lastText: string | undefined
+const MODEL = 'sonnet'
+
+let dir: string | null = null
+
+async function boardDir($: EngineInterface) {
+  if (dir === null) {
+    const tmp = (await $.env.get('TEMP')) ?? (await $.env.get('TMPDIR')) ?? '/tmp'
+    dir = boardPath(tmp, await $.session.id()).replace(/\/board\.json$/, '')
+  }
+  return dir
+}
+
+async function readText($: EngineInterface, path: string) {
+  return $.fs.read(path).then((t: unknown) => (typeof t === 'string' ? t : undefined)).catch(() => undefined)
+}
+
+// 差分ログ（diffs.jsonl）が正本。状態はそこから作り直し、board.json は見え方の写し
+async function readDiffs($: EngineInterface): Promise<Diff[]> {
+  const text = await readText($, `${await boardDir($)}/diffs.jsonl`)
+  if (!text) return []
+  return text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l) as Diff)
+}
 
 // board.json を読み直す。読めない・壊れているときはボードなし
-async function load($: EngineInterface) {
-  if (path === null) {
-    const tmp = (await $.env.get('TEMP')) ?? (await $.env.get('TMPDIR')) ?? '/tmp'
-    path = boardPath(tmp, await $.session.id())
+async function load($: EngineInterface, changed = false, note: string | null = null) {
+  const board = parseBoard(await readText($, `${await boardDir($)}/board.json`))
+  await update($, seen, () => ({ board, changed: board !== null && changed, note }))
+}
+
+// 1ターン分のやり取りを LLM に読ませて差分を作り、検証して足す
+async function ingest($: EngineInterface) {
+  const d = await boardDir($)
+  const messages = await $.session.messages()
+  if (!Array.isArray(messages)) return
+  const x = lastExchange(messages as any)
+  if (x === null) return
+
+  const diffs = await readDiffs($)
+  let state = replay(diffs, d)
+  const reply = await $.model.complete({ model: MODEL, system: SYSTEM, prompt: buildPrompt(state, x), maxTokens: 3000 })
+  if (!reply.isAnswered) return load($, false, `読み取りに失敗：${reply.reason}`)
+  const parsed = parseReply(reply.text)
+  if (parsed === null) return load($, false, '読み取りに失敗：返答が JSON でない')
+
+  const n = await $.session.turns()
+  const added: Diff[] = []
+  const problems: string[] = []
+  for (const [who, diff] of [['π', parsed.user], ['σ', parsed.claude]] as const) {
+    if (!diff) continue
+    const full: Diff = { ...diff, turn: n, utterance_id: `${who}${n}`, text: who === 'π' ? x.user.slice(0, 200) : '（Claude の返信と作業）' }
+    const p = validate(state, full)
+    if (p.length) { problems.push(...p.map(q => `${who}${n}: ${q}`)); continue }
+    state = apply(state, full)
+    added.push(full)
   }
-  const text = await $.fs.read(path).then((t: unknown) => (typeof t === 'string' ? t : undefined)).catch(() => undefined)
-  const board = parseBoard(text)
-  const changed = board !== null && text !== lastText
-  lastText = text
-  await update($, seen, () => ({ board, changed }))
+  const changed = added.some(a => (a.ops ?? []).some(o => o.op !== 'none'))
+  if (added.length) {
+    await $.fs.write(`${d}/diffs.jsonl`, [...diffs, ...added].map(a => JSON.stringify(a)).join('\n') + '\n')
+    await $.fs.write(`${d}/board.json`, JSON.stringify(board(state), null, 2))
+  }
+  if (problems.length) await $.ui.log(`intent-board: 弾いた差分 ${problems.join(' / ')}`, { to: 'debug' })
+  await load($, changed, problems.length ? `弾いた差分 ${problems.length}件` : null)
 }
 
 export const register: Register = on => {
@@ -41,12 +92,16 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    await load($)
+    // 本体の会話だけ。サブエージェントのターンは読まない
+    if (e.agentId === undefined && e.reason === 'answer') {
+      await update($, seen, v => ({ ...v, note: '読み取り中…' }))
+      await ingest($).catch(async (err: unknown) => load($, false, `読み取りに失敗：${String(err).slice(0, 80)}`))
+    }
     return result
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const { board, changed } = await read($, seen)
+    const { board, changed, note } = await read($, seen)
     if (e.props.hasSurvey || board === null) {
       return next(e)
     }
@@ -62,7 +117,7 @@ export const register: Register = on => {
           <Text key="supplemented" color={line.supplemented > 0 ? SUPPLEMENTED : undefined} dimColor={line.supplemented === 0}>
             補った前提 {line.supplemented}件
           </Text>
-          <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}  </Text>
+          <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}{note ? ` ｜ ${note}` : ''}  </Text>
           <Button key="open" label="ボードを開く" onPress={() => void $.ui.open({ id: PANE, title: TITLE })} />
         </Box>
       </Box>
