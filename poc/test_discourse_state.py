@@ -1,6 +1,6 @@
 """discourse_state のテスト。ハンドオーバー §1 の A/B 例をそのまま使う。
 
-実行: python -m unittest D:\\private\\.claude\\hooks\\discourse\\test_discourse_state.py
+実行（poc/ で）: python -m unittest test_discourse_state
 """
 import copy
 import os
@@ -8,7 +8,8 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from discourse_state import apply, dependents, empty_state, next_ids, render, replay, validate  # noqa: E402
+from discourse_state import (  # noqa: E402
+    apply, board, dependents, empty_state, next_ids, read_diffs, render, replay, validate)
 
 # --- A/B 例の正しい読み（3発言分の差分） ---------------------------------
 D1 = {
@@ -153,6 +154,77 @@ class Misc(unittest.TestCase):
         self.assertIn("C3: Aを含める  ← π3", out)
         self.assertNotIn("C1", out.split("### 有効なコミットメント")[1])
         self.assertIn("次の ID: C4 / Q1", out)
+
+
+AUDIT_JOB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "audit_job.jsonl")
+
+
+class IntentBoard(unittest.TestCase):
+    """意図ボードは state の見え方。2026-10-05 の監査ジョブを手で書いた差分ログで確かめる。"""
+
+    def setUp(self):
+        self.state = replay(read_diffs(AUDIT_JOB), "audit")
+        self.board = board(self.state)
+
+    def test_goal_keeps_quote_and_reading_apart(self):
+        g = self.board["goal"]
+        self.assertEqual(len(g["quote"]), 2)
+        self.assertIn("代わりに拾って", g["reading"])
+
+    def test_decided_and_supplemented_never_overlap(self):
+        decided = {c["id"] for c in self.board["decided"]}
+        supplemented = {c["id"] for c in self.board["supplemented"]}
+        self.assertEqual(decided, {"C0", "C1", "C5"})
+        self.assertEqual(supplemented, {"C3", "C4"})
+        self.assertFalse(decided & supplemented)
+        self.assertTrue(all(c.get("reason") for c in self.board["supplemented"]))
+
+    def test_replaced_records_what_became_what(self):
+        self.assertEqual(self.board["replaced"], [
+            {"id": "C2", "content": "実行は 10/6 5時ごろ", "turn": 3, "source": "π3", "replaced_by": "C5"}])
+
+    def test_steps_point_back_to_intent(self):
+        self.assertEqual(self.board["steps"][1]["from"], ["goal", "C0", "C3", "C4"])
+
+    def test_open_question_has_owner(self):
+        self.assertEqual(self.board["open"][0], {"id": "Q1", "question": "監査をどの範囲にかけるか",
+                                                 "owner": "claude", "parent": "Q0"})
+
+    def test_supplement_without_reason_is_rejected(self):
+        d = {"turn": 4, "utterance_id": "σ4", "relation": "Continuation",
+             "ops": [{"op": "add", "id": "C6", "content": "x", "by": "claude"}]}
+        self.assertTrue(any("reason" in p for p in validate(self.state, d)))
+
+    def test_confirm_moves_supplement_to_decided(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Acknowledge", "ops": [{"op": "confirm", "id": "C4"}]}
+        self.assertEqual(validate(self.state, d), [])
+        b = board(apply(self.state, d))
+        self.assertIn("C4", {c["id"] for c in b["decided"]})
+        self.assertNotIn("C4", {c["id"] for c in b["supplemented"]})
+
+    def test_confirm_rejects_user_commitment(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Acknowledge", "ops": [{"op": "confirm", "id": "C1"}]}
+        self.assertTrue(validate(self.state, d))
+
+    def test_retract_drops_step_sources(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Correction",
+             "ops": [{"op": "retract", "id": "C3"}]}
+        self.assertEqual(validate(self.state, d), [])
+        b = board(apply(self.state, d))
+        self.assertEqual(b["steps"][1]["from"], ["goal", "C0", "C4"])
+
+    def test_plan_from_unknown_or_retracted_is_rejected(self):
+        d = {"turn": 4, "utterance_id": "π4", "relation": "Correction",
+             "ops": [{"op": "retract", "id": "C3"},
+                     {"op": "plan", "steps": [{"text": "a", "from": ["C3"]}, {"text": "b", "from": ["C9"]}]}]}
+        p = validate(self.state, d)
+        self.assertTrue(any("取り消されている" in x for x in p), p)
+        self.assertTrue(any("C9" in x for x in p), p)
+
+    def test_plan_from_goal_requires_goal(self):
+        d = {"turn": 1, "utterance_id": "π1", "relation": "Continuation",
+             "ops": [{"op": "plan", "steps": [{"text": "a", "from": ["goal"]}]}]}
+        self.assertTrue(any("目的" in x for x in validate(empty_state("t"), d)))
 
 
 if __name__ == "__main__":

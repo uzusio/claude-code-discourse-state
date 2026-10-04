@@ -2,29 +2,38 @@
 
 状態（state）と差分（diff）を受け取り、新しい状態を返す。副作用なし。入力は変更しない。
 LLM が書くのは diff だけ。state を書くのはこのモジュールを呼ぶ hook だけ。
-設計: notes/開発ノート/discourse-state/discourse-state PoC 進め方 2026-09-22.md §2
+意図ボード（6項目）は state の見え方として board() で導出する。ボード用の別の状態は持たない。
 
 state（JSON）:
   {"session": str, "turn": int,
-   "questions":   [{"id": "Q0", "question": str, "opened_by": "π1", "answers": ["C2", ...]}, ...],  # 末尾が最上位
-   "commitments": [{"id": "C2", "content": str, "source": "π2", "depends_on": ["C1", ...]}, ...],
-   "counters": {"C": 3, "Q": 0}}                                                                     # 採番用
+   "goal":        {"quote": [str, ...], "reading": str, "source": "π1"} | None,       # 問いの木の根（ボード①）
+   "questions":   [{"id": "Q0", "question": str, "opened_by": "π1", "answers": ["C2", ...],
+                    "parent": "Q0" | None, "owner": "user" | "claude"}, ...],          # 末尾が最上位（⑥）
+   "commitments": [{"id": "C2", "content": str, "source": "π2", "depends_on": ["C1", ...],
+                    "by": "user" | "claude", "reason": str?}, ...],                   # by=user が②、by=claude が④
+   "retracted":   [{"id": "C1", "content": str, "turn": 3, "source": "π3", "replaced_by": "C3" | None}, ...],  # ③
+   "steps":       [{"text": str, "from": ["goal", "C2", ...]}, ...],                  # ⑤ 意図→いまの手順
+   "counters": {"C": 3, "Q": 0}}                                                     # 採番用
 
 diff（JSON、1発言単位。LLM が diffs.jsonl に1行で追記する）:
   {"turn": 3, "utterance_id": "π3", "text": str,
    "relation": "Correction", "target": "C1", "markers": ["でも", "やっぱ"],
-   "ops": [{"op": "retract", "id": "C1"},
+   "ops": [{"op": "retract", "id": "C1", "replaced_by": "C3"},
            {"op": "add", "id": "C3", "content": "Aを含める", "depends_on": []},
            {"op": "recheck", "id": "C2", "note": "維持。意味は B に加えて A"},
            {"op": "answer", "question": "Q0", "by": "C3", "complete": false}]}
 
 ops の種類:
-  add      コミットメントを足す           (id, content, depends_on?)
-  retract  コミットメントを消す           (id)          ← 依存しているものは recheck か retract が必須
+  add      コミットメントを足す           (id, content, depends_on?, by?, reason?)
+                                          by="claude" は相手が言っていない前提を補ったもの（accommodation）。reason 必須
+  confirm  補った前提をユーザーが認めた   (id)          ← by を claude から user に移す（④→②）
+  retract  コミットメントを消す           (id, replaced_by?)  ← 依存しているものは recheck か retract が必須
   amend    コミットメントの内容を書き直す (id, content)  ← Elaboration 用。content は書き直し後の全文
   recheck  依存先が消えたものを見直した、という宣言。状態は変えない (id, note?)
-  open     問いを積む                     (id, question)
+  open     問いを積む                     (id, question, parent?, owner?)  ← owner は決める人（既定 user）
   answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを降ろす
+  goal     目的を置く・置き換える         (quote, reading)  ← quote はユーザーの言葉の引用、reading はその読み
+  plan     手順を置き換える               (steps: [{text, from}])  ← from は "goal" かコミットメントの id
   none     何もしない                     （Acknowledge 用）
 """
 from __future__ import annotations
@@ -37,7 +46,8 @@ from typing import Any, Iterable
 RELATIONS = frozenset(
     {"Correction", "Elaboration", "Continuation", "Result", "Condition", "Answer", "Open", "Acknowledge"}
 )
-OPS = frozenset({"add", "retract", "amend", "recheck", "open", "answer", "none"})
+OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "goal", "plan", "none"})
+BY = frozenset({"user", "claude"})
 
 _ID_RE = re.compile(r"^([CQ])(\d+)$")
 
@@ -45,7 +55,8 @@ _ID_RE = re.compile(r"^([CQ])(\d+)$")
 # ---------------------------------------------------------------- 基本
 
 def empty_state(session: str) -> dict:
-    return {"session": session, "turn": 0, "questions": [], "commitments": [], "counters": {"C": -1, "Q": -1}}
+    return {"session": session, "turn": 0, "goal": None, "questions": [], "commitments": [],
+            "retracted": [], "steps": [], "counters": {"C": -1, "Q": -1}}
 
 
 def _find(items: list[dict], id_: str) -> dict | None:
@@ -77,7 +88,7 @@ def _bump(counters: dict, id_: str) -> None:
 def validate(state: dict, diff: dict) -> list[str]:
     """diff が state に対して成立するか。問題の一覧を返す（空なら合格）。
 
-    ここで見るのは構造だけ。「その差分が発言の正しい読みか」は見ない（それは Jev の仕事）。
+    ここで見るのは構造だけ。「その差分が発言の正しい読みか」は見ない（それは判定機の仕事）。
     """
     problems: list[str] = []
     rel = diff.get("relation")
@@ -90,10 +101,12 @@ def validate(state: dict, diff: dict) -> list[str]:
 
     cids = {c["id"] for c in state["commitments"]}
     qids = {q["id"] for q in state["questions"]}
-    added: set[str] = set()
+    added: set[str] = {o.get("id") for o in ops if o.get("op") == "add" and o.get("id")}
+    seen_added: set[str] = set()
     opened: set[str] = set()
     retracted: list[str] = []
     rechecked: set[str] = set()
+    has_goal = state.get("goal") is not None or any(o.get("op") == "goal" for o in ops)
 
     for i, op in enumerate(ops):
         kind = op.get("op")
@@ -106,15 +119,26 @@ def validate(state: dict, diff: dict) -> list[str]:
             if not cid or not content:
                 problems.append(f"{where}: add には id と content が要る")
                 continue
-            if cid in cids or cid in added:
+            if cid in cids or cid in seen_added:
                 problems.append(f"{where}: {cid} は既にある")
             elif not _ID_RE.match(cid) or cid[0] != "C":
                 problems.append(f"{where}: コミットメントの id は C+数字: {cid!r}")
             else:
-                added.add(cid)
+                seen_added.add(cid)
             for d in op.get("depends_on", []) or []:
-                if d not in cids and d not in added:
+                if d not in cids and d not in seen_added:
                     problems.append(f"{where}: 依存先 {d} が存在しない")
+            by = op.get("by", "user")
+            if by not in BY:
+                problems.append(f"{where}: by は user か claude: {by!r}")
+            elif by == "claude" and not op.get("reason"):
+                problems.append(f"{where}: 補った前提（by=claude）には reason が要る")
+        elif kind == "confirm":
+            c = _find(state["commitments"], op.get("id"))
+            if c is None:
+                problems.append(f"{where}: confirm の対象 {op.get('id')!r} が存在しない")
+            elif c.get("by", "user") != "claude":
+                problems.append(f"{where}: {c['id']} は補った前提ではない")
         elif kind in ("retract", "amend", "recheck"):
             cid = op.get("id")
             if cid not in cids:
@@ -122,6 +146,9 @@ def validate(state: dict, diff: dict) -> list[str]:
                 continue
             if kind == "retract":
                 retracted.append(cid)
+                rb = op.get("replaced_by")
+                if rb and rb not in cids and rb not in added:
+                    problems.append(f"{where}: replaced_by {rb!r} が存在しない")
             elif kind == "recheck":
                 rechecked.add(cid)
             elif not op.get("content"):
@@ -137,12 +164,39 @@ def validate(state: dict, diff: dict) -> list[str]:
                 problems.append(f"{where}: 問いの id は Q+数字: {qid!r}")
             else:
                 opened.add(qid)
+            parent = op.get("parent")
+            if parent and parent not in qids and parent not in opened:
+                problems.append(f"{where}: 親の問い {parent!r} が存在しない")
+            if op.get("owner", "user") not in BY:
+                problems.append(f"{where}: owner は user か claude: {op.get('owner')!r}")
         elif kind == "answer":
             qid, by = op.get("question"), op.get("by")
             if qid not in qids and qid not in opened:
                 problems.append(f"{where}: answer の対象 {qid!r} が存在しない")
-            if by and by not in cids and by not in added:
+            if by and by not in cids and by not in seen_added:
                 problems.append(f"{where}: answer の by {by!r} が存在しない")
+        elif kind == "goal":
+            if not op.get("quote") or not op.get("reading"):
+                problems.append(f"{where}: goal には quote（引用）と reading（読み）が要る")
+        elif kind == "plan":
+            steps = op.get("steps")
+            if not isinstance(steps, list) or not steps:
+                problems.append(f"{where}: plan には steps が要る")
+                continue
+            for j, st in enumerate(steps):
+                if not st.get("text"):
+                    problems.append(f"{where}.steps[{j}]: text が要る")
+                srcs = st.get("from") or []
+                if not srcs:
+                    problems.append(f"{where}.steps[{j}]: from（どの意図から出た手順か）が要る")
+                for f in srcs:
+                    if f == "goal":
+                        if not has_goal:
+                            problems.append(f"{where}.steps[{j}]: 目的がまだ置かれていない")
+                    elif f not in cids and f not in added:
+                        problems.append(f"{where}.steps[{j}]: from {f!r} が存在しない")
+                    elif f in retracted:
+                        problems.append(f"{where}.steps[{j}]: from {f!r} は取り消されている")
 
     # 取り消したものに依存していたコミットメントは、見直すか一緒に消すかのどちらか
     for cid in retracted:
@@ -154,7 +208,7 @@ def validate(state: dict, diff: dict) -> list[str]:
     kinds = [op.get("op") for op in ops]
     if rel == "Correction" and not any(k in ("retract", "amend") for k in kinds):
         problems.append("Correction なのに retract / amend が無い")
-    if rel == "Acknowledge" and any(k != "none" for k in kinds):
+    if rel == "Acknowledge" and any(k not in ("none", "confirm") for k in kinds):
         problems.append("Acknowledge なのに状態を変える op がある")
     if rel == "Open" and "open" not in kinds:
         problems.append("Open なのに open が無い")
@@ -169,23 +223,38 @@ def apply(state: dict, diff: dict) -> dict:
     """diff を適用した新しい state を返す。state は変更しない。validate 済みを前提。"""
     new = copy.deepcopy(state)
     new.setdefault("counters", {"C": -1, "Q": -1})
+    for k, v in (("goal", None), ("retracted", []), ("steps", [])):
+        new.setdefault(k, v)
     new["turn"] = int(diff.get("turn", new.get("turn", 0) + 1))
     src = diff.get("utterance_id")
 
     for op in diff.get("ops", []):
         kind = op["op"]
         if kind == "add":
-            new["commitments"].append(
-                {"id": op["id"], "content": op["content"], "source": src, "depends_on": list(op.get("depends_on", []) or [])}
-            )
+            c = {"id": op["id"], "content": op["content"], "source": src,
+                 "depends_on": list(op.get("depends_on", []) or []), "by": op.get("by", "user")}
+            if c["by"] == "claude":
+                c["reason"] = op["reason"]
+            new["commitments"].append(c)
             _bump(new["counters"], op["id"])
+        elif kind == "confirm":
+            c = _find(new["commitments"], op["id"])
+            if c is not None:
+                c["by"] = "user"
+                c["confirmed_by"] = src
         elif kind == "retract":
             gone = op["id"]
+            old = _find(new["commitments"], gone)
+            if old is not None:
+                new["retracted"].append({"id": gone, "content": old["content"], "turn": new["turn"],
+                                         "source": src, "replaced_by": op.get("replaced_by")})
             new["commitments"] = [c for c in new["commitments"] if c["id"] != gone]
             for c in new["commitments"]:
                 c["depends_on"] = [d for d in c.get("depends_on", []) if d != gone]
             for q in new["questions"]:
                 q["answers"] = [a for a in q.get("answers", []) if a != gone]
+            for st in new["steps"]:
+                st["from"] = [f for f in st["from"] if f != gone]
         elif kind == "amend":
             c = _find(new["commitments"], op["id"])
             if c is not None:
@@ -193,7 +262,8 @@ def apply(state: dict, diff: dict) -> dict:
         elif kind == "recheck":
             pass  # 宣言だけ。意味を変えるなら amend を使う
         elif kind == "open":
-            new["questions"].append({"id": op["id"], "question": op["question"], "opened_by": src, "answers": []})
+            new["questions"].append({"id": op["id"], "question": op["question"], "opened_by": src, "answers": [],
+                                     "parent": op.get("parent"), "owner": op.get("owner", "user")})
             _bump(new["counters"], op["id"])
         elif kind == "answer":
             q = _find(new["questions"], op["question"])
@@ -204,6 +274,10 @@ def apply(state: dict, diff: dict) -> dict:
                 q["answers"].append(by)
             if op.get("complete"):
                 new["questions"] = [x for x in new["questions"] if x["id"] != q["id"]]
+        elif kind == "goal":
+            new["goal"] = {"quote": list(op["quote"]), "reading": op["reading"], "source": src}
+        elif kind == "plan":
+            new["steps"] = [{"text": st["text"], "from": list(st["from"])} for st in op["steps"]]
         elif kind == "none":
             pass
     return new
@@ -221,7 +295,7 @@ def replay(diffs: Iterable[dict], session: str, strict: bool = True) -> dict:
     return state
 
 
-# ---------------------------------------------------------------- render
+# ---------------------------------------------------------------- render / board
 
 def render(state: dict) -> str:
     """LLM に渡す文面。ここに無い決定・問いは存在しない、と読ませる。"""
@@ -237,12 +311,37 @@ def render(state: dict) -> str:
     if state["commitments"]:
         for c in state["commitments"]:
             dep = f"  依存: {', '.join(c['depends_on'])}" if c.get("depends_on") else ""
-            lines.append(f"- {c['id']}: {c['content']}  ← {c.get('source', '?')}{dep}")
+            mark = "  【補った前提】" if c.get("by") == "claude" else ""
+            lines.append(f"- {c['id']}: {c['content']}  ← {c.get('source', '?')}{dep}{mark}")
     else:
         lines.append("- なし")
     nx = next_ids(state)
     lines.append(f"次の ID: {nx['C']} / {nx['Q']}")
     return "\n".join(lines)
+
+
+def board(state: dict, recent: int = 3) -> dict:
+    """意図ボード（6項目）を state から導出する。mod はこれを描くだけ。
+
+    ② と ④ は同じコミットメントの by で分けるので、同じ中身が両方に載ることはない。
+    """
+    def item(c: dict) -> dict:
+        out = {"id": c["id"], "content": c["content"], "source": c.get("source")}
+        if c.get("reason"):
+            out["reason"] = c["reason"]
+        return out
+
+    goal = state.get("goal")
+    return {
+        "turn": state.get("turn", 0),
+        "goal": goal,                                                                         # ①
+        "decided": [item(c) for c in state["commitments"] if c.get("by", "user") == "user"],  # ②
+        "replaced": list(state.get("retracted", []))[-recent:],                               # ③
+        "supplemented": [item(c) for c in state["commitments"] if c.get("by") == "claude"],   # ④
+        "steps": [dict(st) for st in state.get("steps", [])],                                 # ⑤
+        "open": [{"id": q["id"], "question": q["question"], "owner": q.get("owner", "user"),
+                  "parent": q.get("parent")} for q in reversed(state["questions"])],          # ⑥
+    }
 
 
 # ---------------------------------------------------------------- ファイル入出力（薄い。純粋関数ではないので末尾に隔離）
