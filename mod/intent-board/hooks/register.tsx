@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, ModelCompleteResult, Register, RenderChildren } from 'claude-code'
 
 import type { Board, Seen } from '../types'
 import { bandLine, boardPath, parseBoard, who } from './board'
@@ -59,13 +59,20 @@ async function ingest($: EngineInterface) {
 
   // 判定機：「言われたこと」に分けたものが発言に書かれているか。書かれていなければ補った前提に回す
   const adds = userAdds(parsed.user)
+  let judged: ModelCompleteResult | null = null
   if (parsed.user && adds.length) {
-    const judged = await $.model.complete({ model: JUDGE_MODEL, system: JUDGE_SYSTEM, prompt: buildJudgePrompt(x.user, adds), maxTokens: 1000 })
+    judged = await $.model.complete({ model: JUDGE_MODEL, system: JUDGE_SYSTEM, prompt: buildJudgePrompt(x.user, adds), maxTokens: 1000 })
     const ungrounded = judged.isAnswered ? parseVerdicts(judged.text) : null
     if (ungrounded?.size) parsed.user = demote(parsed.user, ungrounded)
   }
 
   const n = await $.session.turns()
+  // 消費の記録（1ターンあたりのトークン）
+  const usage = (m: string, r: ModelCompleteResult) =>
+    r.isAnswered ? { model: m, input: r.usage.input_tokens, cached: r.usage.cache_read_input_tokens, output: r.usage.output_tokens } : null
+  const usageLine = JSON.stringify({ turn: n, read: usage(MODEL, reply), judge: judged ? usage(JUDGE_MODEL, judged) : null })
+  await $.fs.write(`${d}/usage.jsonl`, `${(await readText($, `${d}/usage.jsonl`)) ?? ''}${usageLine}\n`)
+
   const added: Diff[] = []
   const problems: string[] = []
   for (const [who, diff] of [['π', parsed.user], ['σ', parsed.claude]] as const) {
