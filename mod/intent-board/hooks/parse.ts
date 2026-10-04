@@ -2,6 +2,7 @@
 // 書くのは2つ：ユーザーの発言の読み（user）と、Claude がそのターンで補った前提・手順（claude）。
 // 検証と適用はコード（state.ts）がやる。LLM は差分を出すだけ。
 import type { Diff, State } from './state'
+// Diff.ops の各要素は Op（{ op: string; [k]: any }）
 import { nextIds, render } from './state'
 
 export const SYSTEM = `あなたは会話の構造を記録する係。会話そのものには参加しない。
@@ -91,6 +92,44 @@ export const lastExchange = (messages: readonly Msg[]): Exchange | null => {
     tools: after.flatMap(m => m.toolUses.map(t => `${t.tool} ${summarize(t.input)}`)),
   }
 }
+
+// ---------------------------------------------------------------- 判定機
+// 読み取り役が by=user にした決定が、本当にユーザーの発言に書かれているかを別の呼び出しで確かめる。
+// 書かれていなければ by=claude（補った前提）に回す。逆向き（claude を user に上げる）はしない——認めるのはユーザー。
+
+export const JUDGE_SYSTEM = `あなたは判定係。ユーザーの発言と、そこから読み取られた「決まったこと」の一覧を受け取る。
+各項目が、ユーザーの発言に書かれている（言い換えとして意味が足されていない）かを判定する。
+発言から推測できるだけのもの、発言に無い区別・理由・範囲を足したものは「書かれていない」。
+出力は JSON だけ: {"verdicts": [{"id": "C..", "grounded": true|false, "why": "短い理由"}]}`
+
+export const userAdds = (d: Diff | null) =>
+  (d?.ops ?? []).filter(o => o.op === 'add' && (o.by ?? 'user') === 'user').map(o => ({ id: String(o.id), content: String(o.content) }))
+
+export const buildJudgePrompt = (utterance: string, adds: { id: string; content: string }[]) =>
+  ['## ユーザーの発言', clip(utterance, 4000), '', '## 読み取られた「決まったこと」', ...adds.map(a => `- ${a.id}: ${a.content}`)].join('\n')
+
+export const parseVerdicts = (text: string): Map<string, string> | null => {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  try {
+    const v = JSON.parse(text.slice(start, end + 1))
+    if (!Array.isArray(v?.verdicts)) return null
+    const ungrounded = new Map<string, string>()
+    for (const x of v.verdicts) if (x && x.grounded === false && typeof x.id === 'string') ungrounded.set(x.id, String(x.why ?? ''))
+    return ungrounded
+  } catch {
+    return null
+  }
+}
+
+// 書かれていなかった項目を補った前提に回す
+export const demote = (d: Diff, ungrounded: Map<string, string>): Diff => ({
+  ...d,
+  ops: (d.ops ?? []).map(o =>
+    o.op === 'add' && ungrounded.has(o.id) ? { ...o, by: 'claude', reason: `判定機：発言に書かれていない（${ungrounded.get(o.id)}）` } : o,
+  ),
+})
 
 const summarize = (input: Record<string, unknown>) => {
   const v = input.description ?? input.file_path ?? input.command ?? input.pattern ?? input.title ?? ''

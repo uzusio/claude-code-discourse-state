@@ -3,7 +3,7 @@ import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
 import type { Board, Seen } from '../types'
 import { bandLine, boardPath, parseBoard, who } from './board'
-import { buildPrompt, lastExchange, parseReply, SYSTEM } from './parse'
+import { buildJudgePrompt, buildPrompt, demote, JUDGE_SYSTEM, lastExchange, parseReply, parseVerdicts, SYSTEM, userAdds } from './parse'
 import { apply, board, replay, validate } from './state'
 import type { Diff } from './state'
 
@@ -13,6 +13,7 @@ const SUPPLEMENTED = 'yellow'
 const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null } as Seen)
 
 const MODEL = 'sonnet'
+const JUDGE_MODEL = 'haiku'
 
 let dir: string | null = null
 
@@ -55,6 +56,14 @@ async function ingest($: EngineInterface) {
   if (!reply.isAnswered) return load($, false, `読み取りに失敗：${reply.reason}`)
   const parsed = parseReply(reply.text)
   if (parsed === null) return load($, false, '読み取りに失敗：返答が JSON でない')
+
+  // 判定機：「言われたこと」に分けたものが発言に書かれているか。書かれていなければ補った前提に回す
+  const adds = userAdds(parsed.user)
+  if (parsed.user && adds.length) {
+    const judged = await $.model.complete({ model: JUDGE_MODEL, system: JUDGE_SYSTEM, prompt: buildJudgePrompt(x.user, adds), maxTokens: 1000 })
+    const ungrounded = judged.isAnswered ? parseVerdicts(judged.text) : null
+    if (ungrounded?.size) parsed.user = demote(parsed.user, ungrounded)
+  }
 
   const n = await $.session.turns()
   const added: Diff[] = []
