@@ -15,9 +15,20 @@ export const parseBoard = (text: string | undefined): Board | null => {
   }
 }
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+// 表示幅（全角＝2桁）で切る
+const cols = (ch: string) => (/[ -~｡-ﾟ]/.test(ch) ? 1 : 2)
+export const clip = (s: string, width: number) => {
+  let used = 0
+  let out = ''
+  for (const ch of s) {
+    if (used + cols(ch) > width - 1) return `${out}…`
+    used += cols(ch)
+    out += ch
+  }
+  return out
+}
 
-// 帯の1行：目的の読み・補った前提の数・開いている問いの数
+// 帯：目的の読み（width 桁まで）・補った前提の数・開いている問いの数
 export const bandLine = (b: Board, width = 60) => {
   const goal = b.goal ? clip(b.goal.reading, width) : '目的：未設定'
   return { goal, supplemented: b.supplemented.length, open: b.open.length }

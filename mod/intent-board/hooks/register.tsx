@@ -52,16 +52,19 @@ export const register: Register = on => {
     }
 
     const { Box, Text, Button } = $.ui.resolve(e)
-    const line = bandLine(board)
+    // 1段目に目的、2段目に数とボタン。目的は画面幅で切る（全角は2桁）
+    const line = bandLine(board, Math.max(10, (e.props.bodyColumns ?? 80) - 8))
 
     return (
-      <Box>
-        <Text dimColor>意図：{line.goal} ｜ </Text>
-        <Text key="supplemented" color={line.supplemented > 0 ? SUPPLEMENTED : undefined} dimColor={line.supplemented === 0}>
-          補った前提 {line.supplemented}件
-        </Text>
-        <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''} </Text>
-        <Button key="open" label="ボードを開く" onPress={() => void $.ui.open({ id: PANE, title: TITLE })} />
+      <Box flexDirection="column">
+        <Text dimColor wrap="truncate-end">意図：{line.goal}</Text>
+        <Box>
+          <Text key="supplemented" color={line.supplemented > 0 ? SUPPLEMENTED : undefined} dimColor={line.supplemented === 0}>
+            補った前提 {line.supplemented}件
+          </Text>
+          <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}  </Text>
+          <Button key="open" label="ボードを開く" onPress={() => void $.ui.open({ id: PANE, title: TITLE })} />
+        </Box>
       </Box>
     )
   })

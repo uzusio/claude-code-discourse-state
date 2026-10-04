@@ -23,7 +23,7 @@ test('帯の1行は目的の読み・補った前提・問いの数', async () =
   const board = parseBoard(JSON.stringify(BOARD))
   expect(board).not.toBe(null)
   const line = bandLine(board!, 10)
-  expect(line.goal).toBe('ルールで拾えない違…')
+  expect(line.goal).toBe('ルールで…')
   expect(line.supplemented).toBe(1)
   expect(line.open).toBe(1)
 })
