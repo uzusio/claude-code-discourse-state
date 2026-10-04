@@ -29,7 +29,7 @@ Correction（前の決定を取り消す・置き換える。「でも」「や�
 - {"op":"recheck","id":"...","note":"..."}
 - {"op":"open","id":"Q番号","question":"...","parent":"親の問いの id か省略","owner":"user"|"claude"}  owner は決める人
 - {"op":"answer","question":"Q...","by":"C...","complete":true|false}
-- {"op":"goal","quote":["ユーザーの言葉そのまま"],"reading":"その読み"}  目的が新しく示された・変わったときだけ
+- {"op":"goal","quote":["ユーザーの言葉そのまま"],"reading":"その読み（40字以内の1文）"}  目的が新しく示された・変わったときだけ
 - {"op":"plan","steps":[{"text":"...","from":["goal" か C の id]}]}  Claude がいま進めている手順。全体を置き換える
 - {"op":"none"}
 

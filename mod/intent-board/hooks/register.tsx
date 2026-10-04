@@ -155,11 +155,12 @@ export const register: Register = on => {
 
     const { Box, Text, Button } = $.ui.resolve(e)
     // 1段目に目的、2段目に数とボタン。目的は画面幅で切る（全角は2桁）
-    const line = bandLine(board, Math.max(10, (e.props.bodyColumns ?? 80) - 8))
+    // 1段目に目的（2行まで折り返し、超えた分は切る）、2段目に数とボタン。全角は2桁
+    const line = bandLine(board, Math.max(20, 2 * ((e.props.bodyColumns ?? 80) - 2) - 6))
 
     return (
       <Box flexDirection="column">
-        <Text dimColor wrap="truncate-end">意図：{line.goal}</Text>
+        <Text dimColor wrap="wrap">意図：{line.goal}</Text>
         <Box>
           <Text key="supplemented" color={line.supplemented > 0 ? SUPPLEMENTED : undefined} dimColor={line.supplemented === 0}>
             補った前提 {line.supplemented}件
