@@ -16,6 +16,13 @@ const MODEL = 'sonnet'
 const JUDGE_MODEL = 'haiku'
 
 let dir: string | null = null
+let isOpen = false
+
+// Esc で閉じる。入力欄の上に出るときは高さを抑える
+async function openPane($: EngineInterface) {
+  await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, rows: 14 })
+  isOpen = true
+}
 
 async function boardDir($: EngineInterface) {
   if (dir === null) {
@@ -95,15 +102,28 @@ async function ingest($: EngineInterface) {
 export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'intent-board', description: '意図ボードをペインで開く' })
+    await $.command.register({ name: 'intent-board', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
+    // 読み込み直しのたびに閉じた状態から始める（開きっぱなしで入力欄の上を塞がない）
+    await $.ui.close({ id: PANE }).catch(() => undefined)
+    isOpen = false
     await load($)
     return next(e)
   })
 
+  // /intent-board は開く・閉じるの切り替え
   on('command.run', { command: 'intent-board' }, async $ => {
+    if (isOpen) {
+      await $.ui.close({ id: PANE })
+      return { text: '意図ボードを閉じた' }
+    }
     await load($)
-    await $.ui.open({ id: PANE, title: TITLE })
-    return { text: '意図ボードを開いた' }
+    await openPane($)
+    return { text: '意図ボードを開いた（Esc か /intent-board で閉じる）' }
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE) isOpen = false
+    return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -134,7 +154,7 @@ export const register: Register = on => {
             補った前提 {line.supplemented}件
           </Text>
           <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}{note ? ` ｜ ${note}` : ''}  </Text>
-          <Button key="open" label="ボードを開く" onPress={() => void $.ui.open({ id: PANE, title: TITLE })} />
+          <Button key="open" label="ボードを開く" onPress={() => void openPane($)} />
         </Box>
       </Box>
     )
