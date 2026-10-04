@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { outline } from '../hooks/board'
+import { sections } from '../hooks/board'
 import { apply, board, emptyState, replay, validate } from '../hooks/state'
 import type { Diff } from '../hooks/state'
 import { AUDIT_BOARD, AUDIT_DIFFS } from './fixtures'
@@ -33,21 +33,27 @@ test('取り消したものに依存している決定を放置すると弾く',
   expect(p.some(x => x.includes('C1 は C0 に依存'))).toBe(true)
 })
 
-test('ペインの木：開いた問いは開き、片付いた問いはたたむ。補った前提は木に入れず上にまとめる', async () => {
+test('ペイン：このターンの補完・あなたが決めること・手順を先に出し、履歴はたたむ', async () => {
   let s = replay(diffs, 'audit')
-  s = apply(s, { turn: 4, utterance_id: 'π4', relation: 'Answer', ops: [{ op: 'answer', question: 'Q1', by: 'C5', complete: true }] })
-  const keys = (flipped: string[]) => outline(board(s), new Set(flipped)).map(r => r.key)
-  const rows = outline(board(s), new Set())
-  expect(rows[0]!.text.startsWith('目的：')).toBe(true)
-  expect(rows.some(r => r.key === 's:C3')).toBe(true)
-  expect(rows.some(r => r.key === 'c:C3')).toBe(false)
-  const q1 = rows.find(r => r.key === 'q:Q1')!
-  expect(q1.text.startsWith('✓ Q1')).toBe(true)
-  expect(q1.toggle?.open).toBe(false)
-  expect(keys([]).includes('c:C0')).toBe(true)
-  expect(keys(['q:Q0']).includes('c:C0')).toBe(false)
-  expect(keys(['replaced']).includes('x:C2')).toBe(true)
-  expect(keys([]).includes('x:C2')).toBe(false)
+  s = apply(s, {
+    turn: 4, utterance_id: 'σ4', relation: 'Continuation',
+    ops: [{ op: 'add', id: 'C6', content: '通知は 4時50分に送る', by: 'claude', reason: '時刻は言われていない' },
+          { op: 'open', id: 'Q2', question: '通知先はどこか' }],
+  })
+  const secs = (flipped: string[]) => sections(board(s), new Set(flipped))
+  const byKey = (flipped: string[]) => new Map(secs(flipped).map(x => [x.key, x]))
+  expect(secs([]).map(x => x.key)).toEqual(['fresh', 'mine', 'steps', 'older', 'decided', 'replaced'])
+  const fresh = byKey([]).get('fresh')!
+  expect(fresh.items).toEqual([{ key: 's:C6', text: '通知は 4時50分に送る', sub: '時刻は言われていない', tone: 'supplemented' }])
+  expect(byKey([]).get('mine')!.items.map(i => i.text)).toEqual(['通知先はどこか', '監査ジョブをどう組むか'])
+  // 履歴は既定でたたむ。押すと開く
+  expect(byKey([]).get('older')!.items).toEqual([])
+  expect(byKey(['older']).get('older')!.items.length).toBe(2)
+  expect(byKey([]).get('decided')!.groups).toEqual([])
+  expect(byKey(['decided']).get('decided')!.groups!.map(g => g.title)).toEqual(['監査ジョブをどう組むか'])
+  expect(byKey(['replaced']).get('replaced')!.items[0]!.sub).toBe('→ 実行は 10/5 5時ごろ（日付が変わっていたのを見落としていた）')
+  // id は表に出さない
+  expect(JSON.stringify(secs(['older', 'decided', 'replaced']).map(x => [x.title, x.items.map(i => i.text)]))).not.toMatch(/\bC\d+\b/)
 })
 
 test('apply は入力を変えない', async () => {

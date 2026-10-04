@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
 import type { Seen } from '../types'
-import { bandLine, boardPath, outline, parseBoard } from './board'
+import { bandLine, boardPath, parseBoard, sections } from './board'
+import type { Item } from './board'
 import { buildJudgePrompt, buildPrompt, demote, JUDGE_SYSTEM, lastExchange, parseReply, parseVerdicts, SYSTEM, userAdds } from './parse'
 import { apply, board, replay, validate } from './state'
 import type { Diff } from './state'
@@ -188,21 +189,36 @@ export const register: Register = on => {
     }
     const flipped = new Set(await read($, expanded))
     const flip = (key: string) => void update($, expanded, list => (list.includes(key) ? list.filter(k => k !== key) : [...list, key]))
+    const color = (tone?: string) => (tone === 'supplemented' ? SUPPLEMENTED : tone === 'new' ? 'cyan' : undefined)
+    const item = (it: Item, indent: number) => (
+      <Box key={it.key} flexDirection="column" paddingLeft={indent}>
+        <Box>
+          <Text color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.tone === 'new' ? '新 ' : '・'}</Text>
+          <Box flexShrink={1}><Text wrap="wrap" color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.text}</Text></Box>
+        </Box>
+        {it.sub ? <Box paddingLeft={2}><Text wrap="wrap" dimColor>{it.sub}</Text></Box> : null}
+      </Box>
+    )
     return (
       <Box flexDirection="column">
-        {close}
-        {outline(board, flipped).map(r => {
-          const pad = '  '.repeat(r.depth)
-          if (r.toggle)
-            // 親の行：枠なしの白で、子（決定）より目立たせる
-            return <Button key={r.key} label={`${pad}${r.toggle.open ? '▾' : '▸'} ${r.text}`} plain onPress={() => flip(r.key)} />
-          return (
-            <Text key={r.key} wrap="wrap" bold={r.tone === 'head'} dimColor={r.tone === 'dim'}
-              color={r.tone === 'supplemented' ? SUPPLEMENTED : r.tone === 'new' ? 'cyan' : undefined}>
-              {pad}{r.text}
-            </Text>
-          )
-        })}
+        <Box justifyContent="space-between">
+          <Box flexShrink={1}><Text bold wrap="wrap">{board.goal?.reading ?? '目的：未設定'}</Text></Box>
+          {close}
+        </Box>
+        {sections(board, flipped).map(sec => (
+          <Box key={sec.key} flexDirection="column" marginTop={1}>
+            {sec.collapsible
+              ? <Button key={`h:${sec.key}`} plain dimColor={sec.tone === 'dim'} label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
+              : <Text bold color={color(sec.tone)}>{sec.title}</Text>}
+            {sec.items.map(it => item(it, 1))}
+            {(sec.groups ?? []).map(g => (
+              <Box key={g.key} flexDirection="column" paddingLeft={1} marginTop={1}>
+                <Text dimColor={g.closed} wrap="wrap">{g.closed ? '✓ ' : ''}{g.title}</Text>
+                {g.items.map(it => item(it, 1))}
+              </Box>
+            ))}
+          </Box>
+        ))}
       </Box>
     )
   })

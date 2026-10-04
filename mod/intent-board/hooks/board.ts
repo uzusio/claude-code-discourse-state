@@ -37,92 +37,112 @@ export const bandLine = (b: Board, width = 60) => {
   return { goal, supplemented: b.supplemented.length, open: b.open.length }
 }
 
-// ---------------------------------------------------------------- ペインの木（行の並びとして作る。描画は register.tsx）
+// ---------------------------------------------------------------- ペインの中身（描画は register.tsx）
+//
+// ボードを開くのは「Claude の読みがずれていないか」を確かめるとき。だから上から順に：
+//   1. このターンで補ったこと … いちばん止めたいもの。理由つきで全部開く
+//   2. あなたが決めること     … ユーザーの手番
+//   3. いま進めていること     … 手順。読みが手順にどう効いているか
+//   4. 履歴（これまでの補完・決まったこと・置き換わったこと）… 参照用。たたんでおく
+// id（C12 など）は人が使わないので出さない。
 
-const RECENT_SUP = 3
-
-export type Row = {
+export type Item = { key: string; text: string; sub?: string; tone?: 'supplemented' | 'dim' | 'new' }
+export type Section = {
   key: string
-  depth: number
-  text: string
-  tone?: 'supplemented' | 'dim' | 'head' | 'new'
-  toggle?: { open: boolean }  // 押すと開閉する行
+  title: string
+  tone?: 'supplemented' | 'dim'
+  collapsible?: { open: boolean }   // 見出しを押すと開閉する
+  items: Item[]
+  groups?: { key: string; title: string; closed: boolean; items: Item[] }[]  // 決まったことの問いごとのまとまり
 }
 
-// 既定の開閉：開いている問い・新しい決定を含む枝は開く。片付いた問い・目的の直下・置き換えはたたむ
-// expanded は「既定から反転させた行」のキー
-export const outline = (b: Board, flipped: ReadonlySet<string>): Row[] => {
-  const rows: Row[] = []
-  const items = new Map([...b.decided, ...b.supplemented].map(c => [c.id, c] as const))
-  const supplemented = new Set(b.supplemented.map(c => c.id))
-  const isNew = (id: string) => (items.get(id)?.turn ?? -1) === b.turn
+const MAX_STEPS = 5
+
+// flipped は「既定の開閉から反転させた見出し」のキー
+export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
-  const children = (parent: string | null) => b.tree.nodes.filter(n => n.parent === parent)
-  const hasNew = (id: string): boolean => {
-    const n = b.tree.nodes.find(x => x.id === id)
-    return !!n && (n.items.some(isNew) || children(id).some(c => hasNew(c.id)))
-  }
-  const item = (id: string, depth: number) => {
-    const c = items.get(id)
-    if (!c) return
-    const mark = isNew(id) ? '新 ' : ''
-    // 補った前提は上の「要確認」に出すので、木には言われたことだけを置く
-    if (supplemented.has(id)) return
-    rows.push({ key: `c:${id}`, depth, text: `${mark}${id} ${c.content}`, tone: isNew(id) ? 'new' : 'dim' })
+  const content = new Map([...b.decided, ...b.supplemented].map(c => [c.id, c.content] as const))
+  const isNew = (c: { turn: number }) => c.turn === b.turn
+  const out: Section[] = []
+
+  // 1. このターンで補ったこと
+  const fresh = b.supplemented.filter(isNew)
+  out.push({
+    key: 'fresh',
+    title: fresh.length ? `このターンで補ったこと（${fresh.length}）` : 'このターンで補ったこと',
+    tone: 'supplemented',
+    items: fresh.length
+      ? fresh.map(c => ({ key: `s:${c.id}`, text: c.content, sub: c.reason, tone: 'supplemented' as const }))
+      : [{ key: 'fresh-none', text: 'なし', tone: 'dim' }],
+  })
+
+  // 2. あなたが決めること
+  const mine = b.open.filter(q => q.owner === 'user')
+  if (mine.length)
+    out.push({ key: 'mine', title: `あなたが決めること（${mine.length}）`, items: mine.map(q => ({ key: `q:${q.id}`, text: q.question })) })
+
+  // 3. いま進めていること
+  if (b.steps.length) {
+    const key = 'steps'
+    const long = b.steps.length > MAX_STEPS
+    const open = isOpen(key, false)
+    const shown = long && !open ? b.steps.slice(0, MAX_STEPS) : b.steps
+    out.push({
+      key,
+      title: 'いま進めていること',
+      ...(long ? { collapsible: { open } } : {}),
+      items: [
+        ...shown.map((st, i) => ({ key: `p:${i}`, text: `${i + 1}. ${st.text}` })),
+        ...(long && !open ? [{ key: 'p-more', text: `ほか ${b.steps.length - MAX_STEPS}件`, tone: 'dim' as const }] : []),
+      ],
+    })
   }
 
-  rows.push({ key: 'goal', depth: 0, text: `目的：${b.goal?.reading ?? '未設定'}`, tone: 'head' })
+  // 4. 履歴
+  const older = b.supplemented.filter(c => !isNew(c))
+  if (older.length) {
+    const open = isOpen('older', false)
+    out.push({
+      key: 'older', title: `これまでの補った前提（${older.length}）`, tone: 'dim', collapsible: { open },
+      items: open ? [...older].reverse().map(c => ({ key: `s:${c.id}`, text: c.content, sub: c.reason, tone: 'supplemented' as const })) : [],
+    })
+  }
 
-  if (b.supplemented.length) {
-    rows.push({ key: 'sup', depth: 0, text: `要確認：補った前提 ${b.supplemented.length}件`, tone: 'supplemented' })
-    const sup = (c: Board['supplemented'][number]) => {
-      rows.push({ key: `s:${c.id}`, depth: 1, text: `${isNew(c.id) ? '新 ' : ''}${c.id} ${c.content}`, tone: 'supplemented' })
-      if (c.reason) rows.push({ key: `r:${c.id}`, depth: 2, text: `理由：${c.reason}`, tone: 'dim' })
+  if (b.decided.length) {
+    const open = isOpen('decided', false)
+    const decided = new Set(b.decided.map(c => c.id))
+    const item = (id: string): Item => {
+      const c = b.decided.find(x => x.id === id)!
+      return { key: `c:${id}`, text: c.content, tone: isNew(c) ? 'new' : undefined }
     }
-    // 新しいもの（最大 RECENT_SUP 件）だけ開く。残りはたたむ
-    const older = b.supplemented.slice(0, Math.max(0, b.supplemented.length - RECENT_SUP))
-    if (older.length) {
-      const open = isOpen('sup-older', false)
-      rows.push({ key: 'sup-older', depth: 1, text: `それより前 ${older.length}件`, toggle: { open }, tone: 'dim' })
-      if (open) older.forEach(sup)
-    }
-    b.supplemented.slice(older.length).forEach(sup)
-  }
-
-  const node = (id: string, depth: number) => {
-    const n = b.tree.nodes.find(x => x.id === id)!
-    const key = `q:${id}`
-    const open = isOpen(key, !n.closed || hasNew(id))
-    const decided = n.items.filter(c => !supplemented.has(c)).length
-    const label = n.closed ? `✓ ${id} ${n.question}（決定 ${decided}件）` : `○ ${id} ${n.question}（決める人：${who(n.owner)}）`
-    rows.push({ key, depth, text: label, toggle: { open }, tone: n.closed ? 'dim' : undefined })
-    if (!open) return
-    for (const c of n.items) item(c, depth + 1)
-    for (const ch of children(id)) node(ch.id, depth + 1)
-  }
-  if (b.tree.nodes.length) rows.push({ key: 'qs', depth: 0, text: '問い', tone: 'head' })
-  for (const r of children(null)) node(r.id, 1)
-
-  const loose = b.tree.loose.filter(id => !supplemented.has(id))
-  if (loose.length) {
-    const open = isOpen('loose', loose.some(isNew))
-    rows.push({ key: 'loose', depth: 0, text: `どの問いにも付いていない決定 ${loose.length}件`, toggle: { open }, tone: 'dim' })
-    if (open) for (const id of loose) item(id, 1)
+    const groups = open
+      ? [
+          ...[...b.tree.nodes].reverse()
+            .map(n => ({ key: `g:${n.id}`, title: n.question, closed: n.closed, items: n.items.filter(id => decided.has(id)).map(item) }))
+            .filter(g => g.items.length),
+          ...(b.tree.loose.some(id => decided.has(id))
+            ? [{ key: 'g:loose', title: 'その他', closed: false, items: b.tree.loose.filter(id => decided.has(id)).map(item) }]
+            : []),
+        ]
+      : []
+    out.push({ key: 'decided', title: `決まったこと（${b.decided.length}）`, tone: 'dim', collapsible: { open }, items: [], groups })
   }
 
   if (b.replaced.length) {
     const open = isOpen('replaced', false)
-    rows.push({ key: 'replaced', depth: 0, text: `置き換わったこと ${b.replaced.length}件`, toggle: { open }, tone: 'dim' })
-    if (open)
-      for (const r of b.replaced)
-        rows.push({ key: `x:${r.id}`, depth: 1, text: `${r.id} ${r.content} → ${r.replaced_by ?? '取り消し'}`, tone: 'dim' })
+    out.push({
+      key: 'replaced', title: `置き換わったこと（${b.replaced.length}）`, tone: 'dim', collapsible: { open },
+      items: open
+        ? b.replaced.map(r => ({
+            key: `x:${r.id}`,
+            text: r.content,
+            sub: r.replaced_by ? `→ ${content.get(r.replaced_by) ?? '（その後さらに変わった）'}` : '→ 取り消し',
+            tone: 'dim' as const,
+          }))
+        : [],
+    })
   }
-
-  if (b.steps.length) {
-    rows.push({ key: 'steps', depth: 0, text: 'いまの手順', tone: 'head' })
-    b.steps.forEach((s, i) => rows.push({ key: `p:${i}`, depth: 1, text: `${i + 1}. ${s.text}  ← ${s.from.join('・')}` }))
-  }
-  return rows
+  return out
 }
 
 export const who =(owner: 'user' | 'claude') => (owner === 'user' ? 'ユーザー' : 'Claude が決めて事後報告')
