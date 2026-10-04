@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
 import type { Seen } from '../types'
-import { bandLine, boardPath, parseBoard, sections } from './board'
+import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
 import type { Item } from './board'
 import { buildJudgePrompt, buildPrompt, demote, JUDGE_SYSTEM, lastExchange, parseReply, parseVerdicts, SYSTEM, userAdds } from './parse'
 import { apply, board, replay, validate } from './state'
@@ -157,18 +157,21 @@ export const register: Register = on => {
     }
 
     const { Box, Text, Button } = $.ui.resolve(e)
-    // 1段目に目的、2段目に数とボタン。目的は画面幅で切る（全角は2桁）
-    // 1段目に目的（2行まで折り返し、超えた分は切る）、2段目に数とボタン。全角は2桁
+    // 1段目：意図の読み（2行まで折り返し、超えた分は切る。全角は2桁）
+    // 2段目：流れの次の一歩。補った前提の数は黄色で小さく添えるだけ
     const line = bandLine(board, Math.max(20, 2 * ((e.props.bodyColumns ?? 80) - 2) - 6))
+    const step = nextStep(board)
+    const tail = [changed ? '更新あり' : '', note ?? ''].filter(Boolean).join(' ｜ ')
 
     return (
       <Box flexDirection="column">
-        <Text dimColor wrap="wrap">意図：{line.goal}</Text>
+        <Text wrap="wrap">意図：{line.goal}</Text>
         <Box>
-          <Text key="supplemented" color={line.supplemented > 0 ? SUPPLEMENTED : undefined} dimColor={line.supplemented === 0}>
-            補った前提 {line.supplemented}件
-          </Text>
-          <Text dimColor> ｜ 問い {line.open}件{changed ? ' ｜ 更新あり' : ''}{note ? ` ｜ ${note}` : ''}  </Text>
+          <Box flexShrink={1}>
+            <Text dimColor wrap="truncate-end">{step ?? '流れ：まだ無い'}</Text>
+          </Box>
+          {line.supplemented > 0 ? <Text key="supplemented" color={SUPPLEMENTED}> ｜ 補った前提 {line.supplemented}</Text> : null}
+          <Text dimColor>{tail ? ` ｜ ${tail}` : ''}  </Text>
           <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
         </Box>
       </Box>
@@ -193,20 +196,25 @@ export const register: Register = on => {
     const item = (it: Item, indent: number) => (
       <Box key={it.key} flexDirection="column" paddingLeft={indent}>
         <Box>
-          <Text color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.tone === 'new' ? '新 ' : '・'}</Text>
-          <Box flexShrink={1}><Text wrap="wrap" color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.text}</Text></Box>
+          {it.tone === 'quote' || it.tone === 'strong' ? null : (
+            <Text color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.tone === 'new' ? '新 ' : '・'}</Text>
+          )}
+          <Box flexShrink={1}>
+            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone)} dimColor={it.tone === 'dim' || it.tone === 'quote'}>{it.text}</Text>
+          </Box>
         </Box>
-        {it.sub ? <Box paddingLeft={2}><Text wrap="wrap" dimColor>{it.sub}</Text></Box> : null}
+        {(it.sub ?? []).map((line, i) => (
+          <Box key={`${it.key}:${i}`} paddingLeft={2}>
+            <Text wrap="wrap" color={line.startsWith('言われていない前提') ? SUPPLEMENTED : undefined} dimColor={!line.startsWith('言われていない前提')}>{line}</Text>
+          </Box>
+        ))}
       </Box>
     )
     return (
       <Box flexDirection="column">
-        <Box justifyContent="space-between">
-          <Box flexShrink={1}><Text bold wrap="wrap">{board.goal?.reading ?? '目的：未設定'}</Text></Box>
-          {close}
-        </Box>
+        <Box justifyContent="flex-end">{close}</Box>
         {sections(board, flipped).map(sec => (
-          <Box key={sec.key} flexDirection="column" marginTop={1}>
+          <Box key={sec.key} flexDirection="column" marginBottom={1}>
             {sec.collapsible
               ? <Button key={`h:${sec.key}`} plain dimColor={sec.tone === 'dim'} label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
               : <Text bold color={color(sec.tone)}>{sec.title}</Text>}

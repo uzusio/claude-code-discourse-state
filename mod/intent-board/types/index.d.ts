@@ -1,7 +1,7 @@
 // poc/discourse_state.py の board() が書き出す形
 export type BoardItem = { id: string; content: string; source: string | null; turn: number; reason?: string }
 export type Replaced = { id: string; content: string; turn: number; source: string | null; replaced_by: string | null }
-export type Step = { text: string; from: string[] }
+export type Step = { text: string; from: string[]; why?: string }
 export type OpenQuestion = { id: string; question: string; owner: 'user' | 'claude'; parent: string | null }
 export type TreeNode = { id: string; question: string; owner: 'user' | 'claude'; closed: boolean; parent: string | null; items: string[] }
 export type Board = {

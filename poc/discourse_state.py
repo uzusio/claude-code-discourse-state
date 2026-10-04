@@ -13,7 +13,7 @@ state（JSON）:
    "commitments": [{"id": "C2", "content": str, "source": "π2", "depends_on": ["C1", ...],
                     "by": "user" | "claude", "reason": str?, "turn": int}, ...],      # by=user が②、by=claude が④
    "retracted":   [{"id": "C1", "content": str, "turn": 3, "source": "π3", "replaced_by": "C3" | None}, ...],  # ③
-   "steps":       [{"text": str, "from": ["goal", "C2", ...]}, ...],                  # ⑤ 意図→いまの手順
+   "steps":       [{"text": str, "from": ["goal", "C2", ...], "why": str?}, ...],     # ⑤ 意図→いまの手順（why は意図とのつながり）
    "counters": {"C": 3, "Q": 0}}                                                     # 採番用
 
 diff（JSON、1発言単位。LLM が diffs.jsonl に1行で追記する）:
@@ -34,7 +34,7 @@ ops の種類:
   open     問いを積む                     (id, question, parent?, owner?)  ← owner は決める人（既定 user）
   answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
   goal     目的を置く・置き換える         (quote, reading)  ← quote はユーザーの言葉の引用、reading はその読み
-  plan     手順を置き換える               (steps: [{text, from}])  ← from は "goal" かコミットメントの id
+  plan     手順を置き換える               (steps: [{text, from, why?}])  ← from は "goal" かコミットメントの id、why はなぜこの手順か
   none     何もしない                     （Acknowledge 用）
 """
 from __future__ import annotations
@@ -279,7 +279,8 @@ def apply(state: dict, diff: dict) -> dict:
         elif kind == "goal":
             new["goal"] = {"quote": list(op["quote"]), "reading": op["reading"], "source": src}
         elif kind == "plan":
-            new["steps"] = [{"text": st["text"], "from": list(st["from"])} for st in op["steps"]]
+            new["steps"] = [{"text": st["text"], "from": list(st["from"]), **({"why": st["why"]} if st.get("why") else {})}
+                            for st in op["steps"]]
         elif kind == "none":
             pass
     return new

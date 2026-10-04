@@ -39,14 +39,17 @@ export const bandLine = (b: Board, width = 60) => {
 
 // ---------------------------------------------------------------- ペインの中身（描画は register.tsx）
 //
-// ボードを開くのは「Claude の読みがずれていないか」を確かめるとき。だから上から順に：
-//   1. このターンで補ったこと … いちばん止めたいもの。理由つきで全部開く
-//   2. あなたが決めること     … ユーザーの手番
-//   3. いま進めていること     … 手順。読みが手順にどう効いているか
-//   4. 履歴（これまでの補完・決まったこと・置き換わったこと）… 参照用。たたんでおく
+// このツールの中心は「Claude がユーザーの意図をどう読み、それをどんな流れに落としているか」。
+// 上から：
+//   1. 意図の読み … ユーザーの言葉（引用）と Claude の読み、いま扱っている問い
+//   2. 流れ       … 手順ごとに「なぜこの手順か」と、どの意図から出たか。
+//                    言われていない前提に乗っている手順には、その前提を黄色で添える
+//   3. あなたが決めること
+//   4. 履歴（決まったこと・補った前提・置き換わったこと）… 参照用。たたんでおく
+// 補った前提は読みがずれる原因の1つとして黄色で管理するが、中心には置かない。
 // id（C12 など）は人が使わないので出さない。
 
-export type Item = { key: string; text: string; sub?: string; tone?: 'supplemented' | 'dim' | 'new' }
+export type Item = { key: string; text: string; sub?: string[]; tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' }
 export type Section = {
   key: string
   title: string
@@ -56,63 +59,58 @@ export type Section = {
   groups?: { key: string; title: string; closed: boolean; items: Item[] }[]  // 決まったことの問いごとのまとまり
 }
 
-const MAX_STEPS = 5
-
 // flipped は「既定の開閉から反転させた見出し」のキー
 export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
-  const content = new Map([...b.decided, ...b.supplemented].map(c => [c.id, c.content] as const))
+  const decided = new Map(b.decided.map(c => [c.id, c] as const))
+  const supplemented = new Map(b.supplemented.map(c => [c.id, c] as const))
   const isNew = (c: { turn: number }) => c.turn === b.turn
   const out: Section[] = []
 
-  // 1. このターンで補ったこと
-  const fresh = b.supplemented.filter(isNew)
+  // 1. 意図の読み
+  const focus = b.open[0]
   out.push({
-    key: 'fresh',
-    title: fresh.length ? `このターンで補ったこと（${fresh.length}）` : 'このターンで補ったこと',
-    tone: 'supplemented',
-    items: fresh.length
-      ? fresh.map(c => ({ key: `s:${c.id}`, text: c.content, sub: c.reason, tone: 'supplemented' as const }))
-      : [{ key: 'fresh-none', text: 'なし', tone: 'dim' }],
+    key: 'reading',
+    title: '意図の読み',
+    items: b.goal
+      ? [
+          ...b.goal.quote.map((q, i) => ({ key: `quote:${i}`, text: `「${q}」`, tone: 'quote' as const })),
+          { key: 'reading', text: b.goal.reading, tone: 'strong' as const },
+          ...(focus ? [{ key: 'focus', text: `いま扱っている問い：${focus.question}`, tone: 'dim' as const }] : []),
+        ]
+      : [{ key: 'reading-none', text: 'まだ読めていない', tone: 'dim' as const }],
   })
 
-  // 2. あなたが決めること
+  // 2. 流れ
+  if (b.steps.length) {
+    out.push({
+      key: 'flow',
+      title: '流れ',
+      items: b.steps.map((st, i) => {
+        const basis = st.from
+          .map(f => (f === 'goal' ? '目的' : decided.has(f) ? `「${decided.get(f)!.content}」` : null))
+          .filter((x): x is string => x !== null)
+        const premises = st.from.map(f => supplemented.get(f)).filter(c => c !== undefined)
+        const sub = [
+          ...(st.why ? [st.why] : []),
+          ...(basis.length ? [`← ${basis.join('・')}`] : []),
+          ...premises.map(c => `言われていない前提：${c!.content}${c!.reason ? `（${c!.reason}）` : ''}`),
+        ]
+        return { key: `p:${i}`, text: `${i + 1}. ${st.text}`, sub }
+      }),
+    })
+  }
+
+  // 3. あなたが決めること
   const mine = b.open.filter(q => q.owner === 'user')
   if (mine.length)
     out.push({ key: 'mine', title: `あなたが決めること（${mine.length}）`, items: mine.map(q => ({ key: `q:${q.id}`, text: q.question })) })
 
-  // 3. いま進めていること
-  if (b.steps.length) {
-    const key = 'steps'
-    const long = b.steps.length > MAX_STEPS
-    const open = isOpen(key, false)
-    const shown = long && !open ? b.steps.slice(0, MAX_STEPS) : b.steps
-    out.push({
-      key,
-      title: 'いま進めていること',
-      ...(long ? { collapsible: { open } } : {}),
-      items: [
-        ...shown.map((st, i) => ({ key: `p:${i}`, text: `${i + 1}. ${st.text}` })),
-        ...(long && !open ? [{ key: 'p-more', text: `ほか ${b.steps.length - MAX_STEPS}件`, tone: 'dim' as const }] : []),
-      ],
-    })
-  }
-
   // 4. 履歴
-  const older = b.supplemented.filter(c => !isNew(c))
-  if (older.length) {
-    const open = isOpen('older', false)
-    out.push({
-      key: 'older', title: `これまでの補った前提（${older.length}）`, tone: 'dim', collapsible: { open },
-      items: open ? [...older].reverse().map(c => ({ key: `s:${c.id}`, text: c.content, sub: c.reason, tone: 'supplemented' as const })) : [],
-    })
-  }
-
   if (b.decided.length) {
     const open = isOpen('decided', false)
-    const decided = new Set(b.decided.map(c => c.id))
     const item = (id: string): Item => {
-      const c = b.decided.find(x => x.id === id)!
+      const c = decided.get(id)!
       return { key: `c:${id}`, text: c.content, tone: isNew(c) ? 'new' : undefined }
     }
     const groups = open
@@ -128,6 +126,22 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
     out.push({ key: 'decided', title: `決まったこと（${b.decided.length}）`, tone: 'dim', collapsible: { open }, items: [], groups })
   }
 
+  if (b.supplemented.length) {
+    const open = isOpen('supplemented', false)
+    const fresh = b.supplemented.filter(isNew).length
+    out.push({
+      key: 'supplemented',
+      title: `補った前提（${b.supplemented.length}${fresh ? `・うち新しく ${fresh}` : ''}）`,
+      tone: 'supplemented',
+      collapsible: { open },
+      items: open
+        ? [...b.supplemented].reverse().map(c => ({
+            key: `s:${c.id}`, text: `${isNew(c) ? '新 ' : ''}${c.content}`, sub: c.reason ? [c.reason] : [], tone: 'supplemented' as const,
+          }))
+        : [],
+    })
+  }
+
   if (b.replaced.length) {
     const open = isOpen('replaced', false)
     out.push({
@@ -136,7 +150,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
         ? b.replaced.map(r => ({
             key: `x:${r.id}`,
             text: r.content,
-            sub: r.replaced_by ? `→ ${content.get(r.replaced_by) ?? '（その後さらに変わった）'}` : '→ 取り消し',
+            sub: [r.replaced_by ? `→ ${decided.get(r.replaced_by)?.content ?? supplemented.get(r.replaced_by)?.content ?? '（その後さらに変わった）'}` : '→ 取り消し'],
             tone: 'dim' as const,
           }))
         : [],
@@ -144,5 +158,8 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
   }
   return out
 }
+
+// 帯の2行目：流れの次の一歩
+export const nextStep = (b: Board) => (b.steps.length ? `次：${b.steps[0]!.text}${b.steps.length > 1 ? `（ほか ${b.steps.length - 1}）` : ''}` : null)
 
 export const who =(owner: 'user' | 'claude') => (owner === 'user' ? 'ユーザー' : 'Claude が決めて事後報告')

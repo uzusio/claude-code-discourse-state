@@ -16,7 +16,7 @@ export type State = {
   goal: { quote: string[]; reading: string; source: string | null } | null
   questions: Question[]; commitments: Commitment[]
   retracted: { id: string; content: string; turn: number; source: string | null; replaced_by: string | null }[]
-  steps: { text: string; from: string[] }[]
+  steps: { text: string; from: string[]; why?: string }[]
   counters: { C: number; Q: number }
 }
 export type Op = { op: string; [k: string]: any }
@@ -180,7 +180,7 @@ export const apply = (state: State, diff: Diff): State => {
         s.goal = { quote: [...op.quote], reading: op.reading, source: src }
         break
       case 'plan':
-        s.steps = op.steps.map((st: any) => ({ text: st.text, from: [...st.from] }))
+        s.steps = op.steps.map((st: any) => ({ text: st.text, from: [...st.from], ...(st.why ? { why: st.why } : {}) }))
         break
     }
   }
