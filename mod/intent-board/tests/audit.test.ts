@@ -16,7 +16,7 @@ test('最後の発言と、その後の返信・作業、直近の発言を取�
     { role: 'user' as const, text: '', toolUses: [], toolResults: [{}] },
     { role: 'assistant' as const, text: '進めたよ', toolUses: [] },
   ]
-  expect(lastExchange(msgs)).toEqual({ user: 'Issue を進めて', recentUser: ['前の発言', 'Issue を進めて'], assistant: '進めたよ', tools: ['Bash テストを回す'] })
+  expect(lastExchange(msgs)).toEqual({ user: 'Issue を進めて', recentUser: ['前の発言', 'Issue を進めて'], prevAssistant: '前の返信', assistant: '進めたよ', tools: ['Bash テストを回す'] })
   expect(lastExchange([...msgs, { role: 'user', text: '/loop 進めて', toolUses: [] }])).toBe(null)
 })
 
@@ -32,7 +32,7 @@ test('出どころ：このターンに by=user で足した、まだ認めら�
 
 test('食い違い：ボードと作業をプロンプトに入れ、指摘だけを返す。ボードは書き換えない', async () => {
   const s = replay(diffs, 'audit')
-  const p = buildDeviationPrompt(s, { user: '進めて', recentUser: ['進めて'], assistant: '規準監査を飛ばしてカードを読んだ', tools: [] })
+  const p = buildDeviationPrompt(s, { user: '進めて', recentUser: ['進めて'], prevAssistant: '', assistant: '規準監査を飛ばしてカードを読んだ', tools: [] })
   expect(p.includes('1. 規準監査（sonnet）')).toBe(true)
   expect(p.includes('監査はユーザーが指示したときだけ')).toBe(true)
   expect(parseDeviation('{"flags": [{"text": "流れでは規準監査が先なのに飛ばした"}]}')).toEqual([{ kind: 'deviation', text: '流れでは規準監査が先なのに飛ばした' }])

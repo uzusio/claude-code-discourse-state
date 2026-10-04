@@ -11,7 +11,8 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…（�
 
 // ---------------------------------------------------------------- 会話記録から1ターン分を取る
 
-export type Exchange = { user: string; recentUser: string[]; assistant: string; tools: string[] }
+// prevAssistant：ユーザーの発言の直前の Claude の返信（「そうして」のような同意が、何への同意かを読むため）
+export type Exchange = { user: string; recentUser: string[]; prevAssistant: string; assistant: string; tools: string[] }
 type Msg = { role: 'user' | 'assistant'; text: string; toolUses: { tool: string; input: Record<string, unknown> }[]; toolResults?: unknown }
 
 const isUtterance = (m: Msg) => m.role === 'user' && !!m.text.trim() && !m.toolResults
@@ -24,9 +25,11 @@ export const lastExchange = (messages: readonly Msg[], recent = 3): Exchange | n
   if (i < 0 || isCommand(messages[i]!)) return null
   const after = messages.slice(i + 1).filter(m => m.role === 'assistant')
   const recentUser = messages.slice(0, i + 1).filter(m => isUtterance(m) && !isCommand(m)).slice(-recent).map(m => m.text)
+  const before = messages.slice(0, i).filter(m => m.role === 'assistant' && m.text.trim())
   return {
     user: messages[i]!.text,
     recentUser,
+    prevAssistant: before.length ? before[before.length - 1]!.text : '',
     assistant: after.map(m => m.text).filter(Boolean).join('\n\n'),
     tools: after.flatMap(m => m.toolUses.map(t => `${t.tool} ${summarize(t.input)}`)),
   }
@@ -42,13 +45,18 @@ const summarize = (input: Record<string, unknown>) => {
 export const ATTRIBUTION_SYSTEM = `あなたは監査係。ユーザーの直近の発言と、AI が「ユーザーが言ったこと」として記録した項目の一覧を受け取る。
 各項目が、ユーザーの発言に書かれている（言い換えとして意味が足されていない）かを判定する。
 発言から推測できるだけのもの、発言に無い区別・理由・範囲を足したものは「書かれていない」。
+ユーザーが直前の AI の提案に同意した（「そうして」「それでいい」「OK」など）ときは、同意した提案の中身も「書かれている」とみなす。ただし提案に無いものを足していれば「書かれていない」。
 出力は JSON だけ: {"verdicts": [{"id": "C..", "grounded": true|false, "why": "短い理由"}]}`
 
 export const attributionTargets = (s: State, turn: number) =>
   s.commitments.filter(c => c.by === 'user' && c.turn === turn && !c.confirmed_by).map(c => ({ id: c.id, content: c.content }))
 
 export const buildAttributionPrompt = (x: Exchange, items: { id: string; content: string }[]) =>
-  ['## ユーザーの直近の発言（古い順）', ...x.recentUser.map(u => `- ${clip(u, 1500)}`), '', '## 「ユーザーが言ったこと」として記録された項目', ...items.map(a => `- ${a.id}: ${a.content}`)].join('\n')
+  [
+    '## ユーザーの最後の発言の直前の AI の返信（ユーザーが同意した提案を読むため）', clip(x.prevAssistant, 3000) || '（なし）', '',
+    '## ユーザーの直近の発言（古い順）', ...x.recentUser.map(u => `- ${clip(u, 1500)}`), '',
+    '## 「ユーザーが言ったこと」として記録された項目', ...items.map(a => `- ${a.id}: ${a.content}`),
+  ].join('\n')
 
 export const parseAttribution = (text: string, items: { id: string; content: string }[]): Flag[] | null => {
   const v = parseJson(text)
