@@ -197,7 +197,34 @@ export const replay = (diffs: Diff[], session: string): State => {
   return s
 }
 
-// LLM に渡す文面。ここに無い決定・問いは存在しない、と読ませる
+// board_update の結果に返す短い要約。全体を返すと毎ターン数千トークンになるので、
+// 次の差分を書くのに要るもの（読み・開いている問い・最近の決定・手順・次の ID）だけにする
+export const renderCompact = (s: State, recent = 8): string => {
+  const lines: string[] = []
+  lines.push(`読み: ${s.goal?.reading ?? '未設定'}`)
+  const open = s.questions.filter(q => !q.closed)
+  lines.push(`開いている問い: ${open.length ? open.map(q => `${q.id} ${q.question}`).join(' ／ ') : 'なし'}`)
+  const tail = s.commitments.slice(-recent)
+  lines.push(`最近の決定（全 ${s.commitments.length} 件中 ${tail.length} 件）:`)
+  for (const c of tail) lines.push(`- ${c.id}${c.by === 'claude' ? '（補完）' : ''} ${c.content}`)
+  lines.push(`手順: ${s.steps.length ? s.steps.map((st, i) => `${i + 1}. ${st.text}`).join(' ／ ') : 'なし'}`)
+  const nx = nextIds(s)
+  lines.push(`次の ID: ${nx.C} / ${nx.Q}`)
+  return lines.join('\n')
+}
+
+// 指定した id の決定・問いだけを1行ずつ（検証で弾かれたとき、問題に出た id を見せる）
+export const renderIds = (s: State, ids: string[]): string =>
+  ids
+    .map(id => {
+      const c = s.commitments.find(x => x.id === id)
+      if (c) return `- ${c.id} ${c.content}`
+      const q = s.questions.find(x => x.id === id)
+      return q ? `- ${q.id} ${q.question}${q.closed ? '（片付き）' : ''}` : `- ${id}（存在しない）`
+    })
+    .join('\n')
+
+// 全体の文面（デバッグ用）
 export const render = (s: State): string => {
   const lines = ['## 現在の状態（コードが差分ログから導出。ここに無い決定・問いは存在しない）']
   lines.push(s.goal ? `### 目的\n- 引用: ${s.goal.quote.map(q => `「${q}」`).join(' ')}\n- 読み: ${s.goal.reading}` : '### 目的\n- 未設定')

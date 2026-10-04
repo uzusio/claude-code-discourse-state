@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { sections } from '../hooks/board'
-import { apply, board, emptyState, replay, validate } from '../hooks/state'
+import { apply, board, emptyState, renderCompact, renderIds, replay, validate } from '../hooks/state'
 import type { Diff } from '../hooks/state'
 import { AUDIT_BOARD, AUDIT_DIFFS } from './fixtures'
 
@@ -69,6 +69,16 @@ test('ペイン：意図の読み → 流れ → あなたが決めること を
   // id は表に出さない
   const shown = JSON.stringify(secs(['decided', 'supplemented', 'replaced']).map(x => [x.title, x.items.map(i => [i.text, i.sub])]))
   expect(shown).not.toMatch(/\b[CQ]\d+\b/)
+})
+
+test('board_update の結果は短い要約（最近の決定・次の ID）と、弾かれた id だけ', async () => {
+  const s = replay(diffs, 'audit')
+  const text = renderCompact(s, 2)
+  expect(text.includes('最近の決定（全 5 件中 2 件）:')).toBe(true)
+  expect(text.includes('- C5 実行は 10/5 5時ごろ')).toBe(true)
+  expect(text.includes('- C0 ')).toBe(false)
+  expect(text.endsWith('次の ID: C6 / Q2')).toBe(true)
+  expect(renderIds(s, ['C2', 'Q1'])).toBe('- C2（存在しない）\n- Q1 監査をどの範囲にかけるか')
 })
 
 test('apply は入力を変えない', async () => {

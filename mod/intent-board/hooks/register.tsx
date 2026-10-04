@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Seen } from '../types'
 import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
 import type { Item } from './board'
-import { apply, board, RELATIONS, render, replay, validate } from './state'
+import { apply, board, RELATIONS, renderCompact, renderIds, replay, validate } from './state'
 import type { Diff } from './state'
 
 const PANE = 'intent-board'
@@ -98,13 +98,16 @@ async function applyFromAgent($: EngineInterface, input: Record<string, unknown>
     turn: n, utterance_id: `τ${n}`, text: '（本体が書いた）',
   }
   const problems = validate(state, diff)
-  if (problems.length)
-    return { text: `ボードを更新できなかった。直して呼び直すこと：\n${problems.map(p => `- ${p}`).join('\n')}\n\n${render(state)}`, isError: true }
+  if (problems.length) {
+    const ids = [...new Set(problems.join(' ').match(/\b[CQ]\d+\b/g) ?? [])]
+    const related = ids.length ? `\n\n問題に出た id:\n${renderIds(state, ids)}` : ''
+    return { text: `ボードを更新できなかった。直して呼び直すこと：\n${problems.map(p => `- ${p}`).join('\n')}${related}\n\n${renderCompact(state)}`, isError: true }
+  }
   const next = apply(state, diff)
   await $.fs.write(`${d}/diffs.jsonl`, [...diffs, diff].map(x => JSON.stringify(x)).join('\n') + '\n')
   await $.fs.write(`${d}/board.json`, JSON.stringify(board(next), null, 2))
   await load($, (diff.ops ?? []).some(o => o.op !== 'none'))
-  return { text: `ボードを更新した。\n\n${render(next)}`, isError: false }
+  return { text: `ボードを更新した。\n\n${renderCompact(next)}`, isError: false }
 }
 
 export const register: Register = on => {
