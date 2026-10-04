@@ -1,11 +1,10 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
 import type { Seen } from '../types'
 import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
 import type { Item } from './board'
-import { buildJudgePrompt, buildPrompt, demote, JUDGE_SYSTEM, lastExchange, parseReply, parseVerdicts, SYSTEM, userAdds } from './parse'
-import { apply, board, replay, validate } from './state'
+import { apply, board, RELATIONS, render, replay, validate } from './state'
 import type { Diff } from './state'
 
 const PANE = 'intent-board'
@@ -16,9 +15,6 @@ const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: nul
 const opened = atom({ plugin: 'intent-board', key: 'opened' } as const, false)
 // ペインの木で、既定の開閉から反転させた行のキー
 const expanded = atom({ plugin: 'intent-board', key: 'expanded' } as const, [] as string[])
-
-const MODEL = 'sonnet'
-const JUDGE_MODEL = 'haiku'
 
 let dir: string | null = null
 
@@ -63,60 +59,72 @@ async function load($: EngineInterface, changed = false, note: string | null = n
   await update($, seen, () => ({ board, changed: board !== null && changed, note }))
 }
 
-// 1ターン分のやり取りを LLM に読ませて差分を作り、検証して足す
-async function ingest($: EngineInterface) {
+// ---------------------------------------------------------------- 本体が書くボード（#12）
+// ボードは会話している本体（Claude）が自分で書く。別モデルの読み取りは使わない。
+// 本体はターンの終わりに board_update ツールで差分を渡し、mod が検証して足す。崩れていれば突き返す。
+
+const TOOL = 'board_update'
+const TOOL_FULL = 'mcp__intent-board__board_update'
+
+const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている、あなたの「いまの理解」）を更新する。
+ユーザーの発言を受けて意図の読み・決まったこと・流れが変わったターンでは、返信の終わりに必ず1回呼ぶ。変化が無ければ呼ばなくてよい。
+ボードはあなたの頭の中をそのまま見せるもの。あなた自身の理解を書く。
+
+渡すのは差分1つ：{"relation": 関係, "ops": [操作, ...]}
+関係：Correction（前の決定を取り消す・置き換える）／Elaboration（詳しくする）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（問いを開く）／Acknowledge（受け取るだけ）
+操作：
+- goal {quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"} … 意図の読みができた・変わったとき
+- plan {steps:[{text, from:["goal" か C の id], why:"なぜこの手順か（30字以内）"}]} … これからの流れ。全体を置き換える。終わった手順は外す
+- add {id:"C番号", content, by:"user"|"claude", reason?, depends_on?} … 決まったこと。by=user はユーザーが言った・認めたことだけ。あなたが補ったもの（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）は by=claude と reason
+- confirm {id} … ユーザーがあなたの補完を認めた
+- retract {id, replaced_by?} / amend {id, content} / recheck {id}
+- open {id:"Q番号", question, parent?, owner:"user"|"claude"} / answer {question, by?, complete}
+規則：意図の読みと by=user の決まったことは、ユーザーの発言を根拠にしか変えない。答えの出た問いは complete で閉じる。id は結果に出る「次の ID」から振る。
+結果として、検証の結果と、更新後のボードの状態（id つき）が返る。`
+
+let updatedThisTurn = false
+let workedThisTurn = false
+let missedLastTurn = false
+
+// 本体から渡された差分を検証して足す。返すのはツールの結果の文面
+async function applyFromAgent($: EngineInterface, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const d = await boardDir($)
-  const messages = await $.session.messages()
-  if (!Array.isArray(messages)) return
-  const x = lastExchange(messages as any)
-  if (x === null) return
-
   const diffs = await readDiffs($)
-  let state = replay(diffs, d)
-  const reply = await $.model.complete({ model: MODEL, system: SYSTEM, prompt: buildPrompt(state, x), maxTokens: 3000 })
-  if (!reply.isAnswered) return load($, false, `読み取りに失敗：${reply.reason}`)
-  const parsed = parseReply(reply.text)
-  if (parsed === null) return load($, false, '読み取りに失敗：返答が JSON でない')
-
-  // 判定機：「言われたこと」に分けたものが発言に書かれているか。書かれていなければ補った前提に回す
-  const adds = userAdds(parsed.user)
-  let judged: ModelCompleteResult | null = null
-  if (parsed.user && adds.length) {
-    judged = await $.model.complete({ model: JUDGE_MODEL, system: JUDGE_SYSTEM, prompt: buildJudgePrompt(x.user, adds), maxTokens: 1000 })
-    const ungrounded = judged.isAnswered ? parseVerdicts(judged.text) : null
-    if (ungrounded?.size) parsed.user = demote(parsed.user, ungrounded)
-  }
-
+  const state = replay(diffs, d)
   const n = await $.session.turns()
-  // 消費の記録（1ターンあたりのトークン）
-  const usage = (m: string, r: ModelCompleteResult) =>
-    r.isAnswered ? { model: m, input: r.usage.input_tokens, cached: r.usage.cache_read_input_tokens, output: r.usage.output_tokens } : null
-  const usageLine = JSON.stringify({ turn: n, read: usage(MODEL, reply), judge: judged ? usage(JUDGE_MODEL, judged) : null })
-  await $.fs.write(`${d}/usage.jsonl`, `${(await readText($, `${d}/usage.jsonl`)) ?? ''}${usageLine}\n`)
-
-  const added: Diff[] = []
-  const problems: string[] = []
-  for (const [who, diff] of [['π', parsed.user], ['σ', parsed.claude]] as const) {
-    if (!diff) continue
-    const full: Diff = { ...diff, turn: n, utterance_id: `${who}${n}`, text: who === 'π' ? x.user.slice(0, 200) : '（Claude の返信と作業）' }
-    const p = validate(state, full)
-    if (p.length) { problems.push(...p.map(q => `${who}${n}: ${q}`)); continue }
-    state = apply(state, full)
-    added.push(full)
+  const diff: Diff = {
+    relation: input.relation as string, target: (input.target as string | null) ?? null,
+    markers: (input.markers as string[]) ?? [], ops: input.ops as Diff['ops'],
+    turn: n, utterance_id: `τ${n}`, text: '（本体が書いた）',
   }
-  const changed = added.some(a => (a.ops ?? []).some(o => o.op !== 'none'))
-  if (added.length) {
-    await $.fs.write(`${d}/diffs.jsonl`, [...diffs, ...added].map(a => JSON.stringify(a)).join('\n') + '\n')
-    await $.fs.write(`${d}/board.json`, JSON.stringify(board(state), null, 2))
-  }
-  if (problems.length) await $.ui.log(`intent-board: 弾いた差分 ${problems.join(' / ')}`, { to: 'debug' })
-  await load($, changed, problems.length ? `弾いた差分 ${problems.length}件` : null)
+  const problems = validate(state, diff)
+  if (problems.length)
+    return { text: `ボードを更新できなかった。直して呼び直すこと：\n${problems.map(p => `- ${p}`).join('\n')}\n\n${render(state)}`, isError: true }
+  const next = apply(state, diff)
+  await $.fs.write(`${d}/diffs.jsonl`, [...diffs, diff].map(x => JSON.stringify(x)).join('\n') + '\n')
+  await $.fs.write(`${d}/board.json`, JSON.stringify(board(next), null, 2))
+  await load($, (diff.ops ?? []).some(o => o.op !== 'none'))
+  return { text: `ボードを更新した。\n\n${render(next)}`, isError: false }
 }
 
 export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'intent-board', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
+    await $.tool.register({
+      name: TOOL,
+      description: TOOL_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          relation: { type: 'string', enum: [...RELATIONS] },
+          target: { type: ['string', 'null'] },
+          markers: { type: 'array', items: { type: 'string' } },
+          ops: { type: 'array', items: { type: 'object' } },
+        },
+        required: ['relation', 'ops'],
+      },
+    })
     // 読み込み直しのたびに閉じた状態から始める（開きっぱなしで入力欄の上を塞がない）
     await closePane($)
     await load($)
@@ -139,12 +147,37 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // 本体のボード更新
+  // 自前のツールは型の一覧に無いので名前で受ける。入力はイベントに直接載る
+  on('tool.call', { tool: TOOL_FULL as any }, async ($, e) => {
+    updatedThisTurn = true
+    const r = await applyFromAgent($, e as unknown as Record<string, unknown>).catch((err: unknown) => ({ text: `ボードの更新で失敗：${String(err)}`, isError: true }))
+    return r.isError ? { result: r.text, isError: true as const } : { result: r.text }
+  })
+
+  // 作業をしたかどうか（ボード更新以外のツール呼び出し）
+  on('tool.call', async ($, e, next) => {
+    if ((e.tool as string) !== TOOL_FULL) workedThisTurn = true
+    return next(e)
+  })
+
+  // 前のターンで作業したのにボードを更新していなければ、このターンの頭で本体に促す（ボードの中身は渡さない）
+  on('prompt.submit', async ($, e, next) => {
+    const remind = missedLastTurn
+    missedLastTurn = false
+    updatedThisTurn = false
+    workedThisTurn = false
+    if (!remind) return next(e)
+    return next({ ...e, context: [...(e.context ?? []), '意図ボード：前のターンで作業をしたのに board_update を呼んでいない。意図の読み・決まったこと・流れに変化があったなら、この返信の終わりに更新すること。'] })
+  })
+
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    // 本体の会話だけ。サブエージェントのターンは読まない
     if (e.agentId === undefined && e.reason === 'answer') {
-      await update($, seen, v => ({ ...v, note: '読み取り中…' }))
-      await ingest($).catch(async (err: unknown) => load($, false, `読み取りに失敗：${String(err).slice(0, 80)}`))
+      if (workedThisTurn && !updatedThisTurn) {
+        missedLastTurn = true
+        await update($, seen, v => ({ ...v, note: 'ボード未更新' }))
+      }
     }
     return result
   })
