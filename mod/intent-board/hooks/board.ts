@@ -39,6 +39,8 @@ export const bandLine = (b: Board, width = 60) => {
 
 // ---------------------------------------------------------------- ペインの木（行の並びとして作る。描画は register.tsx）
 
+const RECENT_SUP = 3
+
 export type Row = {
   key: string
   depth: number
