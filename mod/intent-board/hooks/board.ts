@@ -1,4 +1,4 @@
-import type { Board } from '../types'
+import type { Board, Flag } from '../types'
 
 // board.json の置き場：<一時フォルダ>/discourse-state/<セッション id>/board.json
 export const boardPath = (tmp: string, sessionId: string) =>
@@ -49,18 +49,18 @@ export const bandLine = (b: Board, width = 60) => {
 // 文脈の補完は読みがずれる原因の1つとして黄色で管理するが、中心には置かない。
 // id（C12 など）は人が使わないので出さない。
 
-export type Item = { key: string; text: string; sub?: string[]; tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' }
+export type Item = { key: string; text: string; sub?: string[]; tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' | 'flagged' }
 export type Section = {
   key: string
   title: string
-  tone?: 'supplemented' | 'dim'
+  tone?: 'supplemented' | 'dim' | 'flagged'
   collapsible?: { open: boolean }   // 見出しを押すと開閉する
   items: Item[]
   groups?: { key: string; title: string; closed: boolean; items: Item[] }[]  // 決まったことの問いごとのまとまり
 }
 
 // flipped は「既定の開閉から反転させた見出し」のキー
-export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
+export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly Flag[] = []): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
   const decided = new Map(b.decided.map(c => [c.id, c] as const))
   const supplemented = new Map(b.supplemented.map(c => [c.id, c] as const))
@@ -80,6 +80,15 @@ export const sections = (b: Board, flipped: ReadonlySet<string>): Section[] => {
         ]
       : [{ key: 'reading-none', text: 'まだ読めていない', tone: 'dim' as const }],
   })
+
+  // 監査の指摘（赤）。ボードは書き換えていない。直すのは本体かユーザー
+  if (audit.length)
+    out.push({
+      key: 'audit',
+      title: `監査の指摘（${audit.length}）`,
+      tone: 'flagged',
+      items: audit.map((f, i) => ({ key: `a:${i}`, text: `${f.kind === 'deviation' ? '食い違い' : '出どころ'}：${f.text}`, tone: 'flagged' as const })),
+    })
 
   // 2. 流れ
   if (b.steps.length) {

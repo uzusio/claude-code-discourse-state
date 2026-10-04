@@ -1,16 +1,21 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
 import type { Seen } from '../types'
 import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
 import type { Item } from './board'
 import { apply, board, RELATIONS, renderCompact, renderIds, replay, validate } from './state'
+import { ATTRIBUTION_SYSTEM, attributionTargets, buildAttributionPrompt, buildDeviationPrompt, DEVIATION_SYSTEM, lastExchange, parseAttribution, parseDeviation } from './audit'
+import type { Audit, Flag } from './audit'
 import type { Diff } from './state'
 
 const PANE = 'intent-board'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
-const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null } as Seen)
+const FLAGGED = 'red'
+const ATTRIBUTION_MODEL = 'haiku'
+const DEVIATION_MODEL = 'sonnet'
+const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null, audit: [] } as Seen)
 // ペインが開いているか。帯のボタンの表示（開く／閉じる）を切り替える
 const opened = atom({ plugin: 'intent-board', key: 'opened' } as const, false)
 // ペインの木で、既定の開閉から反転させた行のキー
@@ -55,8 +60,51 @@ async function readDiffs($: EngineInterface): Promise<Diff[]> {
 
 // board.json を読み直す。読めない・壊れているときはボードなし
 async function load($: EngineInterface, changed = false, note: string | null = null) {
-  const board = parseBoard(await readText($, `${await boardDir($)}/board.json`))
-  await update($, seen, () => ({ board, changed: board !== null && changed, note }))
+  const d = await boardDir($)
+  const board = parseBoard(await readText($, `${d}/board.json`))
+  const audit = parseAudit(await readText($, `${d}/audit.json`))
+  await update($, seen, () => ({ board, changed: board !== null && changed, note, audit }))
+}
+
+function parseAudit(text: string | undefined): Flag[] {
+  try {
+    const a = text ? (JSON.parse(text) as Audit) : null
+    return Array.isArray(a?.flags) ? a!.flags : []
+  } catch {
+    return []
+  }
+}
+
+// ---------------------------------------------------------------- 監査役（#13）
+// ターンの終わりに、出どころ（haiku）と食い違い（sonnet）を確かめる。ボードは書き換えず、指摘を audit.json に置く
+async function runAudit($: EngineInterface) {
+  const d = await boardDir($)
+  const messages = await $.session.messages()
+  if (!Array.isArray(messages)) return
+  const x = lastExchange(messages as any)
+  if (x === null) return
+  const state = replay(await readDiffs($), d)
+  const n = await $.session.turns()
+  const flags: Flag[] = []
+  const usage: Record<string, unknown> = { turn: n }
+  const used = (r: ModelCompleteResult) => ({ input: r.usage.input_tokens, cached: r.usage.cache_read_input_tokens, output: r.usage.output_tokens })
+
+  const items = attributionTargets(state, n)
+  if (items.length) {
+    const r = await $.model.complete({ model: ATTRIBUTION_MODEL, system: ATTRIBUTION_SYSTEM, prompt: buildAttributionPrompt(x, items), maxTokens: 1000 })
+    usage.attribution = used(r)
+    if (r.isAnswered) flags.push(...(parseAttribution(r.text, items) ?? []))
+  }
+  const r = await $.model.complete({ model: DEVIATION_MODEL, system: DEVIATION_SYSTEM, prompt: buildDeviationPrompt(state, x), maxTokens: 1000 })
+  usage.deviation = used(r)
+  if (r.isAnswered) flags.push(...(parseDeviation(r.text) ?? []))
+
+  const audit: Audit = { turn: n, flags }
+  await $.fs.write(`${d}/audit.json`, JSON.stringify(audit, null, 2))
+  await $.fs.write(`${d}/audit.jsonl`, `${(await readText($, `${d}/audit.jsonl`)) ?? ''}${JSON.stringify(audit)}\n`)
+  await $.fs.write(`${d}/usage.jsonl`, `${(await readText($, `${d}/usage.jsonl`)) ?? ''}${JSON.stringify(usage)}\n`)
+  const v = await read($, seen)
+  await update($, seen, () => ({ ...v, audit: flags }))
 }
 
 // ---------------------------------------------------------------- 本体が書くボード（#12）
@@ -181,12 +229,13 @@ export const register: Register = on => {
         missedLastTurn = true
         await update($, seen, v => ({ ...v, note: 'ボード未更新' }))
       }
+      if (workedThisTurn || updatedThisTurn) await runAudit($).catch(() => undefined)
     }
     return result
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const { board, changed, note } = await read($, seen)
+    const { board, changed, note, audit } = await read($, seen)
     const isOpen = await read($, opened)
     if (e.props.hasSurvey || board === null) {
       return next(e)
@@ -206,6 +255,7 @@ export const register: Register = on => {
           <Box flexShrink={1}>
             <Text dimColor wrap="truncate-end">{step ?? '流れ：まだ無い'}</Text>
           </Box>
+          {audit.length ? <Text color={FLAGGED}> ｜ 監査の指摘 {audit.length}</Text> : null}
           <Text dimColor>{tail ? ` ｜ ${tail}` : ''}  </Text>
           <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
         </Box>
@@ -215,7 +265,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { board } = await read($, seen)
+    const { board, audit } = await read($, seen)
     const close = <Button key="close" label="閉じる" onPress={() => void closePane($)} />
     if (board === null) {
       return (
@@ -227,7 +277,7 @@ export const register: Register = on => {
     }
     const flipped = new Set(await read($, expanded))
     const flip = (key: string) => void update($, expanded, list => (list.includes(key) ? list.filter(k => k !== key) : [...list, key]))
-    const color = (tone?: string) => (tone === 'supplemented' ? SUPPLEMENTED : tone === 'new' ? 'cyan' : undefined)
+    const color = (tone?: string) => (tone === 'supplemented' ? SUPPLEMENTED : tone === 'flagged' ? FLAGGED : tone === 'new' ? 'cyan' : undefined)
     const item = (it: Item, indent: number) => (
       <Box key={it.key} flexDirection="column" paddingLeft={indent}>
         <Box>
@@ -248,11 +298,11 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box justifyContent="flex-end">{close}</Box>
-        {sections(board, flipped).map(sec => (
+        {sections(board, flipped, audit).map(sec => (
           <Box key={sec.key} flexDirection="column" marginBottom={1}>
             {sec.collapsible
               ? <Button key={`h:${sec.key}`} plain label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
-              : <Text bold color={sec.tone === 'supplemented' ? SUPPLEMENTED : 'white'}>{sec.title}</Text>}
+              : <Text bold color={sec.tone === 'supplemented' ? SUPPLEMENTED : sec.tone === 'flagged' ? FLAGGED : 'white'}>{sec.title}</Text>}
             {sec.items.map(it => item(it, 1))}
             {(sec.groups ?? []).map(g => (
               <Box key={g.key} flexDirection="column" paddingLeft={1} marginTop={1}>

@@ -1,0 +1,40 @@
+import { expect, test } from 'claude-code/testing'
+
+import { attributionTargets, buildDeviationPrompt, lastExchange, parseAttribution, parseDeviation } from '../hooks/audit'
+import { apply, replay } from '../hooks/state'
+import type { Diff } from '../hooks/state'
+import { AUDIT_DIFFS } from './fixtures'
+
+const diffs = AUDIT_DIFFS as unknown as Diff[]
+
+test('最後の発言と、その後の返信・作業、直近の発言を取る。スラッシュコマンドは読まない', async () => {
+  const msgs = [
+    { role: 'user' as const, text: '前の発言', toolUses: [] },
+    { role: 'assistant' as const, text: '前の返信', toolUses: [] },
+    { role: 'user' as const, text: 'Issue を進めて', toolUses: [] },
+    { role: 'assistant' as const, text: '', toolUses: [{ tool: 'Bash', input: { description: 'テストを回す' } }] },
+    { role: 'user' as const, text: '', toolUses: [], toolResults: [{}] },
+    { role: 'assistant' as const, text: '進めたよ', toolUses: [] },
+  ]
+  expect(lastExchange(msgs)).toEqual({ user: 'Issue を進めて', recentUser: ['前の発言', 'Issue を進めて'], assistant: '進めたよ', tools: ['Bash テストを回す'] })
+  expect(lastExchange([...msgs, { role: 'user', text: '/loop 進めて', toolUses: [] }])).toBe(null)
+})
+
+test('出どころ：このターンに by=user で足した、まだ認められていない決定だけを確かめ、書かれていないものを指摘にする', async () => {
+  let s = replay(diffs, 'audit')
+  s = apply(s, { turn: 4, utterance_id: 'τ4', relation: 'Elaboration', ops: [{ op: 'add', id: 'C6', content: '通知は Slack に送る' }] })
+  const items = attributionTargets(s, 4)
+  expect(items).toEqual([{ id: 'C6', content: '通知は Slack に送る' }])
+  const flags = parseAttribution('{"verdicts": [{"id": "C6", "grounded": false, "why": "Slack とは言っていない"}]}', items)
+  expect(flags).toEqual([{ kind: 'attribution', text: '「通知は Slack に送る」はユーザーの発言に書かれていない（Slack とは言っていない）。文脈の補完では？' }])
+  expect(parseAttribution('だめ', items)).toBe(null)
+})
+
+test('食い違い：ボードと作業をプロンプトに入れ、指摘だけを返す。ボードは書き換えない', async () => {
+  const s = replay(diffs, 'audit')
+  const p = buildDeviationPrompt(s, { user: '進めて', recentUser: ['進めて'], assistant: '規準監査を飛ばしてカードを読んだ', tools: [] })
+  expect(p.includes('1. 規準監査（sonnet）')).toBe(true)
+  expect(p.includes('監査はユーザーが指示したときだけ')).toBe(true)
+  expect(parseDeviation('{"flags": [{"text": "流れでは規準監査が先なのに飛ばした"}]}')).toEqual([{ kind: 'deviation', text: '流れでは規準監査が先なのに飛ばした' }])
+  expect(parseDeviation('{"flags": []}')).toEqual([])
+})
