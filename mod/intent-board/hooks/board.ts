@@ -68,7 +68,7 @@ export const outline = (b: Board, flipped: ReadonlySet<string>): Row[] => {
     const mark = isNew(id) ? '新 ' : ''
     // 補った前提は上の「要確認」に出すので、木には言われたことだけを置く
     if (supplemented.has(id)) return
-    rows.push({ key: `c:${id}`, depth, text: `${mark}${id} ${c.content}`, tone: isNew(id) ? 'new' : undefined })
+    rows.push({ key: `c:${id}`, depth, text: `${mark}${id} ${c.content}`, tone: isNew(id) ? 'new' : 'dim' })
   }
 
   rows.push({ key: 'goal', depth: 0, text: `目的：${b.goal?.reading ?? '未設定'}`, tone: 'head' })

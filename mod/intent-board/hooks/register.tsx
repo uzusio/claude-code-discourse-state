@@ -194,7 +194,8 @@ export const register: Register = on => {
         {outline(board, flipped).map(r => {
           const pad = '  '.repeat(r.depth)
           if (r.toggle)
-            return <Button key={r.key} label={`${pad}${r.toggle.open ? '▾' : '▸'} ${r.text}`} onPress={() => flip(r.key)} />
+            // 親の行：枠なしの白で、子（決定）より目立たせる
+            return <Button key={r.key} label={`${pad}${r.toggle.open ? '▾' : '▸'} ${r.text}`} plain onPress={() => flip(r.key)} />
           return (
             <Text key={r.key} wrap="wrap" bold={r.tone === 'head'} dimColor={r.tone === 'dim'}
               color={r.tone === 'supplemented' ? SUPPLEMENTED : r.tone === 'new' ? 'cyan' : undefined}>
