@@ -70,16 +70,23 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const { board } = await read($, seen)
+    const close = <Button key="close" label="閉じる" onPress={() => void $.ui.close({ id: PANE })} />
     if (board === null) {
       return (
         <Box flexDirection="column">
           <Text dimColor>まだボードがない（board.json が見つからない）</Text>
+          {close}
         </Box>
       )
     }
-    return <Box flexDirection="column">{sections(board, Text, Box)}</Box>
+    return (
+      <Box flexDirection="column">
+        {close}
+        {sections(board, Text, Box)}
+      </Box>
+    )
   })
 }
 
