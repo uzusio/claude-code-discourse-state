@@ -1,0 +1,1 @@
+{ "name": "intent-board", "version": "0.1.0", "description": "意図ボード：Claude がユーザーの意図をどう汲み取っているかを、プロンプトの上の帯とペインに出す" }
