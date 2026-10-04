@@ -75,10 +75,18 @@ export const outline = (b: Board, flipped: ReadonlySet<string>): Row[] => {
 
   if (b.supplemented.length) {
     rows.push({ key: 'sup', depth: 0, text: `要確認：補った前提 ${b.supplemented.length}件`, tone: 'supplemented' })
-    for (const c of b.supplemented) {
+    const sup = (c: Board['supplemented'][number]) => {
       rows.push({ key: `s:${c.id}`, depth: 1, text: `${isNew(c.id) ? '新 ' : ''}${c.id} ${c.content}`, tone: 'supplemented' })
       if (c.reason) rows.push({ key: `r:${c.id}`, depth: 2, text: `理由：${c.reason}`, tone: 'dim' })
     }
+    // 新しいもの（最大 RECENT_SUP 件）だけ開く。残りはたたむ
+    const older = b.supplemented.slice(0, Math.max(0, b.supplemented.length - RECENT_SUP))
+    if (older.length) {
+      const open = isOpen('sup-older', false)
+      rows.push({ key: 'sup-older', depth: 1, text: `それより前 ${older.length}件`, toggle: { open }, tone: 'dim' })
+      if (open) older.forEach(sup)
+    }
+    b.supplemented.slice(older.length).forEach(sup)
   }
 
   const node = (id: string, depth: number) => {
