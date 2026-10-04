@@ -1,0 +1,232 @@
+// 会話の状態（SDRT の関係ラベル＋QUD の問いのスタック）を差分で更新する純粋関数。
+// poc/discourse_state.py の移植。両者は poc/examples/audit_job.jsonl で同じ結果になることをテストで確かめる。
+import type { Board } from '../types'
+
+export type By = 'user' | 'claude'
+export type Commitment = {
+  id: string; content: string; source: string | null; depends_on: string[]; by: By
+  reason?: string; confirmed_by?: string | null
+}
+export type Question = {
+  id: string; question: string; opened_by: string | null; answers: string[]; parent: string | null; owner: By
+}
+export type State = {
+  session: string; turn: number
+  goal: { quote: string[]; reading: string; source: string | null } | null
+  questions: Question[]; commitments: Commitment[]
+  retracted: { id: string; content: string; turn: number; source: string | null; replaced_by: string | null }[]
+  steps: { text: string; from: string[] }[]
+  counters: { C: number; Q: number }
+}
+export type Op = { op: string; [k: string]: any }
+export type Diff = {
+  turn?: number; utterance_id?: string; text?: string; relation?: string
+  target?: string | null; markers?: string[]; ops?: Op[]
+}
+
+export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge']
+export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'goal', 'plan', 'none']
+const BY = ['user', 'claude']
+const ID_RE = /^([CQ])(\d+)$/
+
+export const emptyState = (session: string): State => ({
+  session, turn: 0, goal: null, questions: [], commitments: [], retracted: [], steps: [], counters: { C: -1, Q: -1 },
+})
+
+const find = <T extends { id: string }>(items: T[], id: string) => items.find(it => it.id === id)
+
+export const dependents = (s: State, cid: string) =>
+  s.commitments.filter(c => (c.depends_on ?? []).includes(cid)).map(c => c.id)
+
+export const nextIds = (s: State) => ({ C: `C${s.counters.C + 1}`, Q: `Q${s.counters.Q + 1}` })
+
+const bump = (counters: State['counters'], id: string) => {
+  const m = ID_RE.exec(id)
+  if (m) counters[m[1] as 'C' | 'Q'] = Math.max(counters[m[1] as 'C' | 'Q'], Number(m[2]))
+}
+
+// 構造だけを見る。「その差分が発言の正しい読みか」は判定機の仕事
+export const validate = (s: State, diff: Diff): string[] => {
+  const problems: string[] = []
+  const rel = diff.relation
+  if (!rel || !RELATIONS.includes(rel)) problems.push(`relation が不正: ${JSON.stringify(rel)}`)
+  const ops = diff.ops
+  if (!Array.isArray(ops)) return [...problems, 'ops がリストでない']
+
+  const cids = new Set(s.commitments.map(c => c.id))
+  const qids = new Set(s.questions.map(q => q.id))
+  const added = new Set(ops.filter(o => o.op === 'add' && o.id).map(o => o.id as string))
+  const seenAdded = new Set<string>()
+  const opened = new Set<string>()
+  const retracted: string[] = []
+  const rechecked = new Set<string>()
+  const hasGoal = s.goal !== null || ops.some(o => o.op === 'goal')
+
+  ops.forEach((op, i) => {
+    const where = `ops[${i}]`
+    const kind = op.op
+    if (!OPS.includes(kind)) return void problems.push(`${where}: op が不正: ${JSON.stringify(kind)}`)
+    if (kind === 'add') {
+      const { id, content } = op
+      if (!id || !content) return void problems.push(`${where}: add には id と content が要る`)
+      if (cids.has(id) || seenAdded.has(id)) problems.push(`${where}: ${id} は既にある`)
+      else if (!ID_RE.test(id) || id[0] !== 'C') problems.push(`${where}: コミットメントの id は C+数字: ${JSON.stringify(id)}`)
+      else seenAdded.add(id)
+      for (const d of op.depends_on ?? []) if (!cids.has(d) && !seenAdded.has(d)) problems.push(`${where}: 依存先 ${d} が存在しない`)
+      const by = op.by ?? 'user'
+      if (!BY.includes(by)) problems.push(`${where}: by は user か claude: ${JSON.stringify(by)}`)
+      else if (by === 'claude' && !op.reason) problems.push(`${where}: 補った前提（by=claude）には reason が要る`)
+    } else if (kind === 'confirm') {
+      const c = find(s.commitments, op.id)
+      if (!c) problems.push(`${where}: confirm の対象 ${JSON.stringify(op.id)} が存在しない`)
+      else if ((c.by ?? 'user') !== 'claude') problems.push(`${where}: ${c.id} は補った前提ではない`)
+    } else if (kind === 'retract' || kind === 'amend' || kind === 'recheck') {
+      const cid = op.id
+      if (!cids.has(cid)) return void problems.push(`${where}: ${kind} の対象 ${JSON.stringify(cid)} が存在しない`)
+      if (kind === 'retract') {
+        retracted.push(cid)
+        const rb = op.replaced_by
+        if (rb && !cids.has(rb) && !added.has(rb)) problems.push(`${where}: replaced_by ${JSON.stringify(rb)} が存在しない`)
+      } else if (kind === 'recheck') rechecked.add(cid)
+      else if (!op.content) problems.push(`${where}: amend には content（書き直し後の全文）が要る`)
+    } else if (kind === 'open') {
+      const { id, question } = op
+      if (!id || !question) return void problems.push(`${where}: open には id と question が要る`)
+      if (qids.has(id) || opened.has(id)) problems.push(`${where}: ${id} は既にある`)
+      else if (!ID_RE.test(id) || id[0] !== 'Q') problems.push(`${where}: 問いの id は Q+数字: ${JSON.stringify(id)}`)
+      else opened.add(id)
+      if (op.parent && !qids.has(op.parent) && !opened.has(op.parent)) problems.push(`${where}: 親の問い ${JSON.stringify(op.parent)} が存在しない`)
+      if (!BY.includes(op.owner ?? 'user')) problems.push(`${where}: owner は user か claude: ${JSON.stringify(op.owner)}`)
+    } else if (kind === 'answer') {
+      if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: answer の対象 ${JSON.stringify(op.question)} が存在しない`)
+      if (op.by && !cids.has(op.by) && !seenAdded.has(op.by)) problems.push(`${where}: answer の by ${JSON.stringify(op.by)} が存在しない`)
+    } else if (kind === 'goal') {
+      if (!op.quote?.length || !op.reading) problems.push(`${where}: goal には quote（引用）と reading（読み）が要る`)
+    } else if (kind === 'plan') {
+      const steps = op.steps
+      if (!Array.isArray(steps) || !steps.length) return void problems.push(`${where}: plan には steps が要る`)
+      steps.forEach((st: any, j: number) => {
+        if (!st.text) problems.push(`${where}.steps[${j}]: text が要る`)
+        const srcs: string[] = st.from ?? []
+        if (!srcs.length) problems.push(`${where}.steps[${j}]: from（どの意図から出た手順か）が要る`)
+        for (const f of srcs) {
+          if (f === 'goal') { if (!hasGoal) problems.push(`${where}.steps[${j}]: 目的がまだ置かれていない`) }
+          else if (!cids.has(f) && !added.has(f)) problems.push(`${where}.steps[${j}]: from ${JSON.stringify(f)} が存在しない`)
+          else if (retracted.includes(f)) problems.push(`${where}.steps[${j}]: from ${JSON.stringify(f)} は取り消されている`)
+        }
+      })
+    }
+  })
+
+  for (const cid of retracted)
+    for (const d of dependents(s, cid))
+      if (!rechecked.has(d) && !retracted.includes(d)) problems.push(`${d} は ${cid} に依存しているが recheck も retract もされていない`)
+
+  const kinds = ops.map(o => o.op)
+  if (rel === 'Correction' && !kinds.some(k => k === 'retract' || k === 'amend')) problems.push('Correction なのに retract / amend が無い')
+  if (rel === 'Acknowledge' && kinds.some(k => k !== 'none' && k !== 'confirm')) problems.push('Acknowledge なのに状態を変える op がある')
+  if (rel === 'Open' && !kinds.includes('open')) problems.push('Open なのに open が無い')
+  if (rel === 'Answer' && !kinds.includes('answer')) problems.push('Answer なのに answer が無い')
+  return problems
+}
+
+// validate 済みを前提に、新しい状態を返す。入力は変えない
+export const apply = (state: State, diff: Diff): State => {
+  const s: State = structuredClone(state)
+  s.turn = Number(diff.turn ?? s.turn + 1)
+  const src = diff.utterance_id ?? null
+  for (const op of diff.ops ?? []) {
+    switch (op.op) {
+      case 'add': {
+        const c: Commitment = { id: op.id, content: op.content, source: src, depends_on: [...(op.depends_on ?? [])], by: op.by ?? 'user' }
+        if (c.by === 'claude') c.reason = op.reason
+        s.commitments.push(c)
+        bump(s.counters, op.id)
+        break
+      }
+      case 'confirm': {
+        const c = find(s.commitments, op.id)
+        if (c) { c.by = 'user'; c.confirmed_by = src }
+        break
+      }
+      case 'retract': {
+        const gone = op.id
+        const old = find(s.commitments, gone)
+        if (old) s.retracted.push({ id: gone, content: old.content, turn: s.turn, source: src, replaced_by: op.replaced_by ?? null })
+        s.commitments = s.commitments.filter(c => c.id !== gone)
+        for (const c of s.commitments) c.depends_on = c.depends_on.filter(d => d !== gone)
+        for (const q of s.questions) q.answers = q.answers.filter(a => a !== gone)
+        for (const st of s.steps) st.from = st.from.filter(f => f !== gone)
+        break
+      }
+      case 'amend': {
+        const c = find(s.commitments, op.id)
+        if (c) c.content = op.content
+        break
+      }
+      case 'open':
+        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user' })
+        bump(s.counters, op.id)
+        break
+      case 'answer': {
+        const q = find(s.questions, op.question)
+        if (!q) break
+        if (op.by && !q.answers.includes(op.by)) q.answers.push(op.by)
+        if (op.complete) s.questions = s.questions.filter(x => x.id !== q.id)
+        break
+      }
+      case 'goal':
+        s.goal = { quote: [...op.quote], reading: op.reading, source: src }
+        break
+      case 'plan':
+        s.steps = op.steps.map((st: any) => ({ text: st.text, from: [...st.from] }))
+        break
+    }
+  }
+  return s
+}
+
+export const replay = (diffs: Diff[], session: string): State => {
+  let s = emptyState(session)
+  diffs.forEach((d, n) => {
+    const p = validate(s, d)
+    if (p.length) throw new Error(`diff #${n} (${d.utterance_id}): ${p.join('; ')}`)
+    s = apply(s, d)
+  })
+  return s
+}
+
+// LLM に渡す文面。ここに無い決定・問いは存在しない、と読ませる
+export const render = (s: State): string => {
+  const lines = ['## 現在の状態（コードが差分ログから導出。ここに無い決定・問いは存在しない）']
+  lines.push(s.goal ? `### 目的\n- 引用: ${s.goal.quote.map(q => `「${q}」`).join(' ')}\n- 読み: ${s.goal.reading}` : '### 目的\n- 未設定')
+  lines.push('### 開いている問い（上が最上位）')
+  if (s.questions.length)
+    for (const q of [...s.questions].reverse())
+      lines.push(`- ${q.id}: ${q.question}  回答: ${q.answers.length ? q.answers.join(', ') : 'なし'}  決める人: ${q.owner}`)
+  else lines.push('- なし')
+  lines.push('### 有効なコミットメント')
+  if (s.commitments.length)
+    for (const c of s.commitments)
+      lines.push(`- ${c.id}: ${c.content}  ← ${c.source ?? '?'}${c.depends_on.length ? `  依存: ${c.depends_on.join(', ')}` : ''}${c.by === 'claude' ? `  【補った前提】理由: ${c.reason}` : ''}`)
+  else lines.push('- なし')
+  lines.push('### 手順')
+  if (s.steps.length) s.steps.forEach((st, i) => lines.push(`${i + 1}. ${st.text}  ← ${st.from.join(', ')}`))
+  else lines.push('- なし')
+  const nx = nextIds(s)
+  lines.push(`次の ID: ${nx.C} / ${nx.Q}`)
+  return lines.join('\n')
+}
+
+export const board = (s: State, recent = 3): Board => {
+  const item = (c: Commitment) => ({ id: c.id, content: c.content, source: c.source, ...(c.reason ? { reason: c.reason } : {}) })
+  return {
+    turn: s.turn,
+    goal: s.goal,
+    decided: s.commitments.filter(c => (c.by ?? 'user') === 'user').map(item),
+    replaced: s.retracted.slice(-recent),
+    supplemented: s.commitments.filter(c => c.by === 'claude').map(item),
+    steps: s.steps.map(st => ({ ...st })),
+    open: [...s.questions].reverse().map(q => ({ id: q.id, question: q.question, owner: q.owner, parent: q.parent })),
+  }
+}
