@@ -21,8 +21,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const diffs = readFileSync(join(root, 'poc/examples/self.jsonl'), 'utf-8')
   .split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l) as Diff)
 const b = board(replay(diffs, 'example'))
-// 監査の指摘の見本：訂正で「作業の前後は問わない」になったのに、返信がまだ作業前の確認を求めている
-const audit: Flag[] = [{ kind: 'deviation', text: '意図の読みがずれているかもしれない：「作業の前後は問わない」に直ったのに、返信はまだ作業を始める前の確認を求めている' }]
+// 監査の指摘はボードに出さない（Claude にだけ渡す）
+const audit: Flag[] = []
 
 // ---------------------------------------------------------------- 行に起こす（register.tsx の描き方に合わせる）
 type Tone = 'white' | 'gray' | 'yellow' | 'red' | 'cyan' | 'accent'
@@ -66,7 +66,7 @@ for (const sec of sections(b, new Set(), audit) as Section[]) {
 const band: Line[] = []
 const line = bandLine(b, 2 * COLS)
 push(band, 0, `意図：${line.goal}`, 'white')
-band.push({ indent: 0, text: `${nextStep(b) ?? '流れ：まだ無い'}   ｜ 監査の指摘 ${audit.length}`, tone: 'gray' })
+band.push({ indent: 0, text: nextStep(b) ?? '流れ：まだ無い', tone: 'gray' })
 
 // ---------------------------------------------------------------- SVG
 const FONT = 15

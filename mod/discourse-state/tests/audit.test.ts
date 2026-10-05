@@ -20,6 +20,21 @@ test('最後の発言と、その後の返信・作業、直近の発言を取�
   expect(lastExchange([...msgs, { role: 'user', text: '/loop 進めて', toolUses: [] }])).toBe(null)
 })
 
+test('作業中に届いた発言（prompt.submit で集めたもの）を、そのターンの発言に足す', async () => {
+  const msgs = [
+    { role: 'assistant' as const, text: '前のターンの返信', toolUses: [] },
+    { role: 'user' as const, text: 'ボードを直して', toolUses: [] },
+    { role: 'assistant' as const, text: '', toolUses: [{ tool: 'Edit', input: { file_path: 'board.ts' } }] },
+    { role: 'user' as const, text: '', toolUses: [], toolResults: [{}] },
+    { role: 'assistant' as const, text: '直したよ', toolUses: [] },
+  ]
+  const x = lastExchange(msgs, 3, ['片付いた作業は見せなくていい', '/loop 進めて'])
+  expect(x?.user).toBe('ボードを直して\n\n片付いた作業は見せなくていい')
+  expect(x?.recentUser).toEqual(['ボードを直して', '片付いた作業は見せなくていい'])
+  expect(x?.prevAssistant).toBe('前のターンの返信')
+  expect(x?.tools).toEqual(['Edit board.ts'])
+})
+
 test('出どころ：このターンに by=user で足した、まだ認められていない決定だけを確かめ、書かれていないものを指摘にする', async () => {
   let s = replay(diffs, 'audit')
   s = apply(s, { turn: 4, utterance_id: 'τ4', relation: 'Elaboration', ops: [{ op: 'add', id: 'C6', content: '通知は Slack に送る' }] })

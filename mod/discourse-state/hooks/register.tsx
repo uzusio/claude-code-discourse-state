@@ -5,7 +5,7 @@ import type { Seen } from '../types'
 import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
 import type { Item } from './board'
 import { apply, board, RELATIONS, renderCompact, renderIds, replay, validate } from './state'
-import { ATTRIBUTION_SYSTEM, attributionTargets, buildAttributionPrompt, buildDeviationPrompt, DEVIATION_SYSTEM, lastExchange, parseAttribution, parseDeviation } from './audit'
+import { buildDeviationPrompt, DEVIATION_SYSTEM, lastExchange, parseDeviation } from './audit'
 import type { Audit, Flag } from './audit'
 import type { Diff } from './state'
 
@@ -13,7 +13,6 @@ const PANE = 'discourse-state'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
 const FLAGGED = 'red'
-const ATTRIBUTION_MODEL = 'haiku'
 const DEVIATION_MODEL = 'sonnet'
 const seen = atom({ plugin: 'discourse-state', key: 'seen' } as const, { board: null, changed: false, note: null, audit: [] } as Seen)
 // ペインが開いているか。帯のボタンの表示（開く／閉じる）を切り替える
@@ -81,7 +80,7 @@ async function runAudit($: EngineInterface) {
   const d = await boardDir($)
   const messages = await $.session.messages()
   if (!Array.isArray(messages)) return
-  const x = lastExchange(messages as any)
+  const x = lastExchange(messages as any, 3, midTurn)
   if (x === null) return
   const state = replay(await readDiffs($), d)
   const n = await $.session.turns()
@@ -89,12 +88,7 @@ async function runAudit($: EngineInterface) {
   const usage: Record<string, unknown> = { turn: n }
   const used = (r: ModelCompleteResult) => ({ input: r.usage.input_tokens, cached: r.usage.cache_read_input_tokens, output: r.usage.output_tokens })
 
-  const items = attributionTargets(state, n)
-  if (items.length) {
-    const r = await $.model.complete({ model: ATTRIBUTION_MODEL, system: ATTRIBUTION_SYSTEM, prompt: buildAttributionPrompt(x, items), maxTokens: 1000 })
-    usage.attribution = used(r)
-    if (r.isAnswered) flags.push(...(parseAttribution(r.text, items) ?? []))
-  }
+  // 出どころ（言葉の突き合わせ）の確認は 2026-10-05 にやめた：意図の読みの監査ではなく、Claude の判断を縛るだけだったため
   const r = await $.model.complete({ model: DEVIATION_MODEL, system: DEVIATION_SYSTEM, prompt: buildDeviationPrompt(state, x), maxTokens: 1000 })
   usage.deviation = used(r)
   if (r.isAnswered) flags.push(...(parseDeviation(r.text) ?? []))
@@ -134,6 +128,8 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 let updatedThisTurn = false
 let workedThisTurn = false
 let missedLastTurn = false
+// このターンの作業中に届いた発言（turnId つきの prompt.submit）。監査に渡す
+let midTurn: string[] = []
 
 // 本体から渡された差分を検証して足す。返すのはツールの結果の文面
 async function applyFromAgent($: EngineInterface, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
@@ -214,13 +210,28 @@ export const register: Register = on => {
   })
 
   // 前のターンで作業したのにボードを更新していなければ、このターンの頭で本体に促す（ボードの中身は渡さない）
+  // 監査の指摘も、ここで本体にだけ渡す。直すか、そのままでよいかは本体が判断する（ユーザーには出さない）
   on('prompt.submit', async ($, e, next) => {
+    // 作業中に届いた発言：ためておくだけ。ターンの区切りの処理（印のリセット・指摘の受け渡し）はしない
+    if (e.turnId !== undefined) {
+      midTurn.push(e.text)
+      return next(e)
+    }
+    midTurn = []
     const remind = missedLastTurn
     missedLastTurn = false
     updatedThisTurn = false
     workedThisTurn = false
-    if (!remind) return next(e)
-    return next({ ...e, context: [...(e.context ?? []), '意図ボード：前のターンで作業をしたのに board_update を呼んでいない。意図の読み・決まったこと・流れに変化があったなら、この返信の終わりに更新すること。'] })
+    const { audit } = await read($, seen)
+    const context = [
+      ...(remind ? ['意図ボード：前のターンで作業をしたのに board_update を呼んでいない。意図の読み・決まったこと・流れに変化があったなら、この返信の終わりに更新すること。'] : []),
+      ...(audit.length
+        ? [`意図ボードの監査（前のターン）：意図の読みが外れているかもしれない兆し。当たっていれば読みか作業を直し、外れていればそのままでよい。あなたが判断し、ユーザーの判断が本当に要るときだけ問いとして開く。\n${audit.map(f => `- ${f.text}`).join('\n')}`]
+        : []),
+    ]
+    if (audit.length) await update($, seen, v => ({ ...v, audit: [] }))
+    if (!context.length) return next(e)
+    return next({ ...e, context: [...(e.context ?? []), ...context] })
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -236,7 +247,7 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const { board, changed, note, audit } = await read($, seen)
+    const { board, changed, note } = await read($, seen)
     const isOpen = await read($, opened)
     if (e.props.hasSurvey || board === null) {
       return next(e)
@@ -256,7 +267,6 @@ export const register: Register = on => {
           <Box flexShrink={1}>
             <Text dimColor wrap="truncate-end">{step ?? '流れ：まだ無い'}</Text>
           </Box>
-          {audit.length ? <Text color={FLAGGED}> ｜ 監査の指摘 {audit.length}</Text> : null}
           <Text dimColor>{tail ? ` ｜ ${tail}` : ''}  </Text>
           <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
         </Box>
@@ -266,7 +276,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const { board, audit } = await read($, seen)
+    const { board } = await read($, seen)
     const close = <Button key="close" label="閉じる" onPress={() => void closePane($)} />
     if (board === null) {
       return (
@@ -302,7 +312,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box justifyContent="flex-end">{close}</Box>
-        {sections(board, flipped, audit).map(sec => (
+        {sections(board, flipped).map(sec => (
           <Box key={sec.key} flexDirection="column" marginBottom={1}>
             {sec.collapsible
               ? <Button key={`h:${sec.key}`} plain label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />

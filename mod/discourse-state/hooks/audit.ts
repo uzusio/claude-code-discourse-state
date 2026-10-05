@@ -20,16 +20,19 @@ const isUtterance = (m: Msg) => m.role === 'user' && !!m.text.trim() && !m.toolR
 const isCommand = (m: Msg) => /^\s*(\/|<command-)/.test(m.text)
 
 // 最後のユーザーの発言と、その後の本体の返信・ツール呼び出し。直近の発言も数件（決定の根拠が前のターンにあることがある）
-export const lastExchange = (messages: readonly Msg[], recent = 3): Exchange | null => {
+// 作業中に届いた発言（turnId つきの prompt.submit）は messages に発言として入らない（会話の記録では queued_command の添付）。
+// 呼ぶ側が prompt.submit で集めた midTurn を渡すと、このターンの発言に足す
+export const lastExchange = (messages: readonly Msg[], recent = 3, midTurn: readonly string[] = []): Exchange | null => {
   let i = messages.length - 1
   while (i >= 0 && !isUtterance(messages[i]!)) i--
   if (i < 0 || isCommand(messages[i]!)) return null
   const after = messages.slice(i + 1).filter(m => m.role === 'assistant')
   const recentUser = messages.slice(0, i + 1).filter(m => isUtterance(m) && !isCommand(m)).slice(-recent).map(m => m.text)
   const before = messages.slice(0, i).filter(m => m.role === 'assistant' && m.text.trim())
+  const extra = midTurn.filter(t => t.trim() && !isCommand({ role: 'user', text: t, toolUses: [] }))
   return {
-    user: messages[i]!.text,
-    recentUser,
+    user: [messages[i]!.text, ...extra].join('\n\n'),
+    recentUser: [...recentUser, ...extra],
     prevAssistant: before.length ? before[before.length - 1]!.text : '',
     assistant: after.map(m => m.text).filter(Boolean).join('\n\n'),
     tools: after.flatMap(m => m.toolUses.map(t => `${t.tool} ${summarize(t.input)}`)),
@@ -71,11 +74,13 @@ export const parseAttribution = (text: string, items: { id: string; content: str
 // ---------------------------------------------------------------- 食い違い
 
 export const DEVIATION_SYSTEM = `あなたは監査係。AI アシスタントが自分で書いた「理解のボード」（ユーザーの意図の読み・決まったこと・これからの流れ・問い）と、そのターンのユーザーの発言、AI の返信と作業を受け取る。
-次の3種類だけを挙げる。どれも、ユーザーの意図を AI が読み違えている兆しとして挙げる。
-1. deviation：AI の返信や作業が、ボードの読み・決まったこと・流れと矛盾している（決まったことに反するやり方、読みと違う方向の作業、流れに無い手順を断りなく進めた）
-2. relevance：AI の返信が、ユーザーのこのターンの発言が求めたこと（問い・依頼）に答えていない。別の問いに答えている、または一部にしか答えていないのに答えた扱いにしている
-3. unclosed：このターンで答えが出た問いがボードで開いたまま、または答えが出ていない問いが閉じられている
-挙げないもの：矛盾しない細部、言い回しの違い、ボードを更新したうえでの変更。迷ったら挙げない。
+目的は1つ：AI がユーザーの意図そのものを読み違えている兆しを見つけること。AI がユーザーの代わりに判断できるようにするための監査なので、AI の判断に任されている進め方は見ない。
+挙げるのは次の場合だけ：
+1. deviation：AI の作業が、ボードの意図の読みや、ユーザーが決めたことと反対の方向に進んでいる
+2. relevance：AI の返信が、ユーザーがこのターンに求めたことと別のことに答えている
+3. unclosed：ユーザーが答えた・決めた問いが開いたまま（ユーザーの手番が残っているように見える）
+挙げないもの：手順の順番、断りなく進めたこと、言葉の出どころ、言い回し、ボードの書き方の細部、AI の判断で決めてよいこと。
+確信が持てるものだけ、多くても2件。無ければ空にする。
 各指摘は、ユーザーが読んで分かるように「意図の読みが〜かもしれない」の形で、何と何がずれているかを具体的に1〜2文で書く。
 出力は JSON だけ: {"flags": [{"kind": "deviation" | "relevance" | "unclosed", "text": "..."}]}`
 
