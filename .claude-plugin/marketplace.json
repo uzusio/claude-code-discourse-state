@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-discourse-state",
+  "description": "Claude Code の mod「意図ボード」の配布元",
+  "owner": {
+    "name": "uzusio"
+  },
+  "plugins": [
+    {
+      "name": "discourse-state",
+      "source": "./mod/discourse-state",
+      "description": "意図ボード：Claude がユーザーの意図をどう読んでいるかを、作業ごとに画面に出す"
+    }
+  ]
+}

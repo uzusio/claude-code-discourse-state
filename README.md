@@ -10,7 +10,7 @@ Claude Code の mod。Claude がユーザーの意図をどう読んでいるか
 - **文脈の補完**：ユーザーが言っていないのに Claude が補った前提。理由つき、黄色
 - **流れ**：これからの手順と、手順ごとの理由
 
-作業は木（作業の分解）で持つ。片付いた作業は出さない。
+作業は木（作業の分解）で持ち、ボードには開いている作業だけを出す。
 
 ![ボードを閉じた状態](docs/board-closed.svg)
 
@@ -20,10 +20,35 @@ Claude Code の mod。Claude がユーザーの意図をどう読んでいるか
 
 Claude Code 2.1.289 で動作を確認している（mod の仕組みが使える版が必要）。
 
+### インストールする
+
+```sh
+claude plugin marketplace add uzusio/claude-code-discourse-state
+claude plugin install discourse-state@claude-code-discourse-state
+```
+
+更新は `claude plugin update discourse-state@claude-code-discourse-state` のあと、セッションで `/reload-plugins`。
+
+### clone して試す
+
+そのセッションだけ読み込む。
+
 ```sh
 git clone https://github.com/uzusio/claude-code-discourse-state
 claude --plugin-dir claude-code-discourse-state/mod/discourse-state
 ```
+
+clone したものを常に読み込むなら、ユーザー設定 `~/.claude/settings.json` の `env` に絶対パスを書く。
+
+```json
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-code-discourse-state/mod/discourse-state"
+  }
+}
+```
+
+どちらの読み込み方でも、mod のファイルを保存するとホットリロードされる。`env` に書いた場合はすべてのセッションで読み込まれ、作業のあったターンごとに監査のモデル呼び出しが走る。
 
 ## 使い方
 
@@ -47,17 +72,17 @@ flowchart LR
   audit -- 指摘を次のターンに --> claude
 ```
 
-- **書く**：Claude 本人が、ターンの終わりに mod のツール `board_update` で差分を渡す。別のモデルが会話を外から読んで書くのではないので、ボードは Claude の理解そのものになる
+- **書く**：Claude 本人が、ターンの終わりに mod のツール `board_update` で差分を渡す。書き手が Claude 本人なので、ボードは Claude の理解そのものになる
 - **検証**：存在しない項目への参照、理由のない補完、取り消した前提への依存の放置などをコードで弾き、ツールの結果として返す
-- **監査**：ターンの終わりに別のモデルが、意図の読みそのものが外れている兆し（作業が読みと反対に進んでいる、求められたことと別のことに答えている、片付いた作業が開いたまま）だけを確かめ、次のターンの頭に Claude にだけ渡す。直すかどうかは Claude が判断する。意図を合わせる目的は Claude がユーザーの代わりに判断できるようにすることなので、監査はユーザーへの確認を増やさない
+- **監査**：ターンの終わりに別のモデルが、意図の読みそのものが外れている兆し（作業が読みと反対に進んでいる、求められたことと別のことに答えている、片付いた作業が開いたまま）だけを確かめ、次のターンの頭に Claude にだけ渡す。直すかどうかは Claude が判断する。意図を合わせる目的は Claude がユーザーの代わりに判断できるようにすることなので、監査の結果は Claude だけが受け取る
 - **書き忘れ**：作業をしたのに更新しなかったターンは、帯に「ボード未更新」と出し、次のターンで Claude に促す
-- **差し込まない**：ボードの中身を Claude のプロンプトに差し込むことはしない
+- **Claude に渡すもの**：ボードの使い方の案内、書き忘れの促し、監査の指摘の3つ。ボードは Claude が書き出す側で、読む側はユーザー
 
 記録はセッションごとに `<TEMP>/discourse-state/<セッション id>/` に置く。監査は作業のあったターンごとにモデルを1回呼ぶ。
 
 ## 背景
 
-談話意味論の枠組みのうち、読みの精度に効く部分だけを使っている。会話を縛る制約（SDRT の右フロンティア制約など）は入れていない。
+談話意味論の枠組みのうち、読みの精度に効く部分だけを使っている。
 
 - **QUD**（Question Under Discussion, Roberts）：会話を議論中の問いの木として扱う。作業を問いの木として持ち、作業ごとに意図の読みを置く
 - **SDRT**（Segmented Discourse Representation Theory, Asher & Lascarides）：発話どうしの関係（訂正・補足・理由・対比・条件など）。関係を更新規則に使い、補完どうしの関係のラベルにも使う
