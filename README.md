@@ -20,35 +20,34 @@ Claude Code の mod。Claude がユーザーの意図をどう読んでいるか
 
 Claude Code 2.1.289 で動作を確認している（mod の仕組みが使える版が必要）。
 
+意図ボードは、使いたいプロジェクトごとに入れる。入れたプロジェクトで開いたセッションでだけ読み込まれ、作業のあったターンごとに監査のモデル呼び出しが走る。
+
 ### インストールする
+
+使いたいプロジェクトのフォルダで実行する。
 
 ```sh
 claude plugin marketplace add uzusio/claude-code-discourse-state
-claude plugin install discourse-state@claude-code-discourse-state
+claude plugin install discourse-state@claude-code-discourse-state --scope project
 ```
+
+`--scope project` はプロジェクトの `.claude/settings.json` に書き、そのリポジトリを使う人みんなに入る。自分だけに入れるなら `--scope local`（`.claude/settings.local.json`）。
 
 更新は `claude plugin update discourse-state@claude-code-discourse-state` のあと、セッションで `/reload-plugins`。
 
-### clone して試す
+### clone して入れる
 
-そのセッションだけ読み込む。
+clone した mod を、使いたいプロジェクトの `.claude/skills/discourse-state` にリンクする。プロジェクトの `.claude/skills/` にあるプラグインは自動で読み込まれ、mod のファイルを保存するとホットリロードされる。
 
 ```sh
 git clone https://github.com/uzusio/claude-code-discourse-state
-claude --plugin-dir claude-code-discourse-state/mod/discourse-state
+# macOS / Linux（使いたいプロジェクトのフォルダで）
+ln -s /path/to/claude-code-discourse-state/mod/discourse-state .claude/skills/discourse-state
+# Windows（コマンドプロンプト）
+mklink /J .claude\skills\discourse-state C:\path\to\claude-code-discourse-state\mod\discourse-state
 ```
 
-clone したものを常に読み込むなら、ユーザー設定 `~/.claude/settings.json` の `env` に絶対パスを書く。
-
-```json
-{
-  "env": {
-    "CLAUDE_CODE_PLUGIN_DIRS": "/path/to/claude-code-discourse-state/mod/discourse-state"
-  }
-}
-```
-
-どちらの読み込み方でも、mod のファイルを保存するとホットリロードされる。`env` に書いた場合はすべてのセッションで読み込まれ、作業のあったターンごとに監査のモデル呼び出しが走る。
+一度だけ試すなら、`claude --plugin-dir claude-code-discourse-state/mod/discourse-state` でそのセッションだけ読み込む。
 
 ## 使い方
 
