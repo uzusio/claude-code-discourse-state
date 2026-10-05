@@ -123,7 +123,8 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 - confirm {id} … ユーザーがあなたの補完を認めた
 - retract {id, replaced_by?} / amend {id, content} / recheck {id}
 - open {id:"Q番号", question, parent?, owner:"user"|"claude", intent?:{quote, reading}} … 作業（問い）を開く。作業は木：大きな作業を分けた下位の作業は parent に親の作業。新しい作業を始めるときは intent も置く
-- answer {question, by?, complete}
+- answer {question, by?, complete} … answer で作業に付けるのは、その作業の問いに直接答える決まったことだけ（作業の直下は「答え」と表示される）。進め方・環境・道具の決めごとは、進め方の作業（片付けてよい）に付ける
+- move {id, question} … 決まったことを別の作業へ付け替える
 規則：意図の読みと by=user の決まったことは、ユーザーの発言を根拠にしか変えない。答えの出た問いは complete で閉じる。id は結果に出る「次の ID」から振る。
 結果として、検証の結果と、更新後のボードの状態（id つき）が返る。`
 

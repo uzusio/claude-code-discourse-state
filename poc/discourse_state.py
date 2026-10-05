@@ -34,6 +34,7 @@ ops の種類:
   recheck  依存先が消えたものを見直した、という宣言。状態は変えない (id, note?)
   open     問い（作業）を積む             (id, question, parent?, owner?, intent?)  ← owner は決める人（既定 user）、intent は {quote, reading}
   answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
+  move     決まったことを別の作業へ付け替える (id, question)  ← ほかの作業の答えから外し、その作業の答えにする
   intent   作業（問い）の意図を置く・置き換える (question, quote, reading)  ← quote はユーザーの言葉、reading は Claude の読み
   goal     （旧）会話全体の目的。互換のため受け付ける。意図は作業ごとに intent で持つ
   plan     手順を置き換える               (steps: [{text, from, why?}])  ← from は "goal" かコミットメントの id、why はなぜこの手順か
@@ -53,7 +54,7 @@ RELATIONS = frozenset(
      "Explanation",    # 「〜だから」。既存の決定・問いへの理由づけ
      "Clarification"}  # 言葉の意味・範囲を確かめる問い
 )
-OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "intent", "goal", "plan", "none"})
+OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "move", "intent", "goal", "plan", "none"})
 # 決まったこと同士の線の種類（親＝depends_on の先頭）。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
 EDGE_RELS = frozenset({"elaboration", "explanation", "contrast", "result", "condition"})
 BY = frozenset({"user", "claude"})
@@ -193,6 +194,11 @@ def validate(state: dict, diff: dict) -> list[str]:
                 problems.append(f"{where}: answer の対象 {qid!r} が存在しない")
             if by and by not in cids and by not in seen_added:
                 problems.append(f"{where}: answer の by {by!r} が存在しない")
+        elif kind == "move":
+            if op.get("id") not in cids and op.get("id") not in seen_added:
+                problems.append(f"{where}: move の対象 {op.get('id')!r} が存在しない")
+            if op.get("question") not in qids and op.get("question") not in opened:
+                problems.append(f"{where}: move の行き先 {op.get('question')!r} が存在しない")
         elif kind == "intent":
             if op.get("question") not in qids and op.get("question") not in opened:
                 problems.append(f"{where}: intent の対象 {op.get('question')!r} が存在しない")
@@ -307,6 +313,12 @@ def apply(state: dict, diff: dict) -> dict:
                 q["answers"].append(by)
             if op.get("complete"):
                 q["closed"] = True
+        elif kind == "move":
+            for q in new["questions"]:
+                q["answers"] = [a for a in q.get("answers", []) if a != op["id"]]
+            q = _find(new["questions"], op["question"])
+            if q is not None:
+                q["answers"].append(op["id"])
         elif kind == "intent":
             q = _find(new["questions"], op["question"])
             if q is not None:

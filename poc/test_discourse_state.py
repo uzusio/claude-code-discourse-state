@@ -205,6 +205,26 @@ class Tree(unittest.TestCase):
         self.assertEqual(nodes["Q0"]["items"], ["C0", "C1", "C5"])
 
 
+class Move(unittest.TestCase):
+    def test_move_reattaches_to_another_task(self):
+        """進め方の決めごとを、意図の作業から片付いた進め方の作業へ付け替える。"""
+        s = replay(read_diffs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "self.jsonl")), "s")
+        d = {"turn": 4, "utterance_id": "t", "relation": "Continuation",
+             "ops": [{"op": "open", "id": "Q3", "question": "進め方", "owner": "claude"},
+                     {"op": "move", "id": "C1", "question": "Q3"},
+                     {"op": "answer", "question": "Q3", "complete": True}]}
+        self.assertEqual(validate(s, d), [])
+        tasks = {t["id"]: t for t in board(apply(s, d))["tasks"]}
+        self.assertNotIn("C1", [i["id"] for i in tasks["Q0"]["items"]])
+        self.assertEqual([i["id"] for i in tasks["Q3"]["items"]], ["C1"])
+        self.assertTrue(tasks["Q3"]["closed"])
+
+    def test_move_rejects_unknown(self):
+        s = replay(read_diffs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "self.jsonl")), "s")
+        d = {"turn": 4, "utterance_id": "t", "relation": "Continuation", "ops": [{"op": "move", "id": "C99", "question": "Q9"}]}
+        self.assertEqual(len(validate(s, d)), 2)
+
+
 class IntentBoard(unittest.TestCase):
     """意図ボードは state の見え方。2026-10-05 の監査ジョブを手で書いた差分ログで確かめる。"""
 

@@ -39,6 +39,21 @@ test('confirm で ④ から ② に移る', async () => {
   expect(b.supplemented.some(c => c.id === 'C4')).toBe(false)
 })
 
+test('move：進め方の決めごとを、片付いた進め方の作業へ付け替えるとボードから消える', async () => {
+  const s = replay(SELF_DIFFS as unknown as Diff[], 'self')
+  const d: Diff = {
+    turn: 4, utterance_id: 't', relation: 'Continuation',
+    ops: [{ op: 'open', id: 'Q3', question: '進め方', owner: 'claude' }, { op: 'move', id: 'C1', question: 'Q3' }, { op: 'answer', question: 'Q3', complete: true }],
+  }
+  expect(validate(s, d)).toEqual([])
+  const b = board(apply(s, d))
+  expect(b.tasks.find(t => t.id === 'Q0')!.items.some(i => i.id === 'C1')).toBe(false)
+  expect(b.tasks.find(t => t.id === 'Q3')!.items.map(i => i.id)).toEqual(['C1'])
+  const shown = sections(b, new Set()).find(x => x.key === 'tasks')!.items.map(i => i.key)
+  expect(shown.includes('c:C1')).toBe(false)
+  expect(shown.includes('t:Q3')).toBe(false)
+})
+
 test('取り消したものに依存している決定を放置すると弾く', async () => {
   let s = emptyState('t')
   s = apply(s, { turn: 1, utterance_id: 'π1', relation: 'Continuation', ops: [{ op: 'add', id: 'C0', content: 'A' }, { op: 'add', id: 'C1', content: 'B', depends_on: ['C0'] }] })

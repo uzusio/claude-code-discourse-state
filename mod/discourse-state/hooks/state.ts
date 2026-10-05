@@ -32,7 +32,7 @@ export type Diff = {
 
 // Contrast（並べるだけ・取り消さない）・Explanation（理由づけ）・Clarification（確かめる問い）は 2026-10-05 に SDRT から追加
 export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge', 'Contrast', 'Explanation', 'Clarification']
-export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'intent', 'goal', 'plan', 'none']
+export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'move', 'intent', 'goal', 'plan', 'none']
 // 決まったこと同士の線の種類。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
 export const EDGE_RELS: EdgeRel[] = ['elaboration', 'explanation', 'contrast', 'result', 'condition']
 const BY = ['user', 'claude']
@@ -114,6 +114,10 @@ export const validate = (s: State, diff: Diff): string[] => {
     } else if (kind === 'answer') {
       if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: answer の対象 ${JSON.stringify(op.question)} が存在しない`)
       if (op.by && !cids.has(op.by) && !seenAdded.has(op.by)) problems.push(`${where}: answer の by ${JSON.stringify(op.by)} が存在しない`)
+    } else if (kind === 'move') {
+      // 決まったことを別の作業へ付け替える：ほかの作業の答えから外し、その作業の答えにする
+      if (!cids.has(op.id) && !seenAdded.has(op.id)) problems.push(`${where}: move の対象 ${JSON.stringify(op.id)} が存在しない`)
+      if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: move の行き先 ${JSON.stringify(op.question)} が存在しない`)
     } else if (kind === 'intent') {
       if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: intent の対象 ${JSON.stringify(op.question)} が存在しない`)
       if (!op.reading) problems.push(`${where}: intent には reading（読み）が要る`)
@@ -195,6 +199,12 @@ export const apply = (state: State, diff: Diff): State => {
         if (!q) break
         if (op.by && !q.answers.includes(op.by)) q.answers.push(op.by)
         if (op.complete) q.closed = true
+        break
+      }
+      case 'move': {
+        for (const q of s.questions) q.answers = q.answers.filter(a => a !== op.id)
+        const q = find(s.questions, op.question)
+        if (q) q.answers.push(op.id)
         break
       }
       case 'intent': {
