@@ -35,6 +35,34 @@ test('作業中に届いた発言（prompt.submit で集めたもの）を、そ
   expect(x?.tools).toEqual(['Edit board.ts'])
 })
 
+test('作業中に届いた発言が後から会話に発言として入っても、1回だけ数え、ターンの始めの発言を起点にする', async () => {
+  const msgs = [
+    { role: 'assistant' as const, text: '前のターンの返信', toolUses: [] },
+    { role: 'user' as const, text: 'ボードを直して', toolUses: [] },
+    { role: 'assistant' as const, text: '', toolUses: [{ tool: 'Edit', input: { file_path: 'board.ts' } }] },
+    { role: 'user' as const, text: '', toolUses: [], toolResults: [{}] },
+    { role: 'user' as const, text: '片付いた作業は見せなくていい ', toolUses: [] },
+    { role: 'assistant' as const, text: '直したよ', toolUses: [{ tool: 'Edit', input: { file_path: 'pane.ts' } }] },
+  ]
+  const x = lastExchange(msgs, 3, ['片付いた作業は見せなくていい'])
+  expect(x?.user).toBe('ボードを直して\n\n片付いた作業は見せなくていい')
+  expect(x?.recentUser).toEqual(['ボードを直して', '片付いた作業は見せなくていい'])
+  expect(x?.prevAssistant).toBe('前のターンの返信')
+  expect(x?.tools).toEqual(['Edit board.ts', 'Edit pane.ts'])
+})
+
+test('作業中の発言と同じ文が前のターンにあっても、このターンの始めで止まる', async () => {
+  const msgs = [
+    { role: 'user' as const, text: 'OK', toolUses: [] },
+    { role: 'assistant' as const, text: '前の返信', toolUses: [] },
+    { role: 'user' as const, text: '進めて', toolUses: [] },
+    { role: 'assistant' as const, text: '進めたよ', toolUses: [] },
+  ]
+  const x = lastExchange(msgs, 3, ['OK'])
+  expect(x?.user).toBe('進めて\n\nOK')
+  expect(x?.recentUser).toEqual(['OK', '進めて', 'OK'])
+})
+
 test('出どころ：このターンに by=user で足した、まだ認められていない決定だけを確かめ、書かれていないものを指摘にする', async () => {
   let s = replay(diffs, 'audit')
   s = apply(s, { turn: 4, utterance_id: 'τ4', relation: 'Elaboration', ops: [{ op: 'add', id: 'C6', content: '通知は Slack に送る' }] })

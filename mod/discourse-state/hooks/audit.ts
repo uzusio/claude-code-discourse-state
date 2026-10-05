@@ -20,11 +20,16 @@ const isUtterance = (m: Msg) => m.role === 'user' && !!m.text.trim() && !m.toolR
 const isCommand = (m: Msg) => /^\s*(\/|<command-)/.test(m.text)
 
 // 最後のユーザーの発言と、その後の本体の返信・ツール呼び出し。直近の発言も数件（決定の根拠が前のターンにあることがある）
-// 作業中に届いた発言（turnId つきの prompt.submit）は messages に発言として入らない（会話の記録では queued_command の添付）。
-// 呼ぶ側が prompt.submit で集めた midTurn を渡すと、このターンの発言に足す
+// 作業中に届いた発言（turnId つきの prompt.submit）は、messages に入らないこと（queued_command の添付）も、後から発言として入ることもある。
+// 呼ぶ側が prompt.submit で集めた midTurn を渡すと、このターンの発言に足す。発言として入ったものは飛ばして、ターンの始めの発言を起点にする
 export const lastExchange = (messages: readonly Msg[], recent = 3, midTurn: readonly string[] = []): Exchange | null => {
+  const queued = new Set(midTurn.map(t => t.trim()))
   let i = messages.length - 1
   while (i >= 0 && !isUtterance(messages[i]!)) i--
+  for (let j = i; j >= 0 && queued.size; j--) {
+    if (!isUtterance(messages[j]!)) continue
+    if (!queued.has(messages[j]!.text.trim())) { i = j; break }
+  }
   if (i < 0 || isCommand(messages[i]!)) return null
   const after = messages.slice(i + 1).filter(m => m.role === 'assistant')
   const recentUser = messages.slice(0, i + 1).filter(m => isUtterance(m) && !isCommand(m)).slice(-recent).map(m => m.text)

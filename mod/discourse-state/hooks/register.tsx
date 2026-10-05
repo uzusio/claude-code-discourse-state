@@ -112,14 +112,14 @@ const TOOL = 'board_update'
 const TOOL_FULL = 'mcp__discourse-state__board_update'
 
 const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている、あなたの「いまの理解」）を更新する。
-作業の意図の読み・文脈の補完・流れが変わったターンでは、返信の終わりに1回呼ぶ。変化が無ければ呼ばなくてよい。
+作業を始めたターンと、作業の意図の読み・文脈の補完・流れが変わったターンで、返信の終わりに1回呼ぶ。
 ボードはあなたの頭の中をそのまま見せるもの。あなた自身の理解を書く。
 
-ボードに書くのは、作業ごとに3つだけ：
+ボードに書くのは、作業ごとに次の3つ：
 - 意図：ユーザーの言葉と、あなたの読み。ユーザーの訂正は読みを書き換えて表す（前の読みは履歴に残る）。読み手・調子・範囲など、自分が無意識に置いている前提も読みに含める
 - 文脈の補完：その読みのために、ユーザーが言っていないのにあなたが補った前提（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）。理由つき
 - 流れ：その作業のこれからの手順と、手順ごとの「なぜ」
-ユーザーが言った決定の一覧は書かない。作業は木：大きな作業を分けた下位の作業は parent で親に付ける。片付いた作業は閉じる。
+作業は木：大きな作業を分けた下位の作業は parent で親に付ける。片付いた作業は閉じる。
 
 渡すのは差分1つ：{"relation": 関係, "ops": [操作, ...]}
 関係：Correction（読みや前提を訂正された）／Contrast（「でも」で並べるだけ）／Elaboration（詳しくなった）／Explanation（理由づけ。target か depends_on で対象を示す）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（新しい作業）／Clarification（言葉の意味・範囲を確かめる問い）／Acknowledge（受け取るだけ）
@@ -133,6 +133,15 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 - answer {question:"Q番号", complete:true} … 作業が片付いた（ボードから消える）
 - move {id, question} … 補完を別の作業へ付け替える
 id は結果に出る「次の ID」から振る。結果として、検証の結果と、開いている作業と意図、最近の項目、次の ID が返る。`
+
+// システムプロンプトに足す案内。ボードがあることと、いつ書くかだけを伝える（ボードの中身は載せない）
+export const GUIDE_SECTION = {
+  id: 'discourse-state:guide',
+  scope: 'session' as const,
+  text: `# 意図ボード
+このセッションには意図ボードがある。ユーザーは、あなたが作業ごとに意図をどう読んでいるかを、入力欄の上の帯とボードで見ている。
+作業を始めたターンと、意図の読み・補った前提・流れが変わったターンの終わりに、${TOOL_FULL} で差分を書く。`,
+}
 
 let updatedThisTurn = false
 let workedThisTurn = false
@@ -186,6 +195,14 @@ export const register: Register = on => {
     await closePane($)
     await load($)
     return next(e)
+  })
+
+  // board_update を最初から説明つきで見せる（ToolSearch の後ろに置かない）。名前だけでは何のツールか伝わらない
+  on('tool.describe', { tool: TOOL_FULL as any }, async (_, e, next) => ({ ...(await next(e)), isDeferred: false }))
+
+  on('prompt.compose', async (_, e, next) => {
+    const r = await next(e)
+    return { ...r, sections: [...r.sections, GUIDE_SECTION] }
   })
 
   // /discourse-state は開く・閉じるの切り替え
