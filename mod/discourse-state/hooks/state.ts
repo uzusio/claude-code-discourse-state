@@ -265,7 +265,11 @@ export const renderCompact = (s: State, recent = 8): string => {
   const tail = s.commitments.slice(-recent)
   lines.push(`最近の決定（全 ${s.commitments.length} 件中 ${tail.length} 件）:`)
   for (const c of tail) lines.push(`- ${c.id}${c.by === 'claude' ? '（補完）' : ''} ${c.content}`)
-  lines.push(`手順: ${s.steps.length ? s.steps.map((st, i) => `${i + 1}. ${st.text}`).join(' ／ ') : 'なし'}`)
+  // 流れは作業ごとに持つ（plan {question}）。作業に付かない旧来の s.steps も残っていれば出す
+  const flow = (steps: { text: string }[]) => steps.map((st, i) => `${i + 1}. ${st.text}`).join(' ／ ')
+  const flows = open.filter(q => q.steps?.length).map(q => `${q.id} ${flow(q.steps!)}`)
+  if (s.steps.length) flows.push(flow(s.steps))
+  lines.push(`手順: ${flows.length ? flows.join(' ／／ ') : 'なし'}`)
   const nx = nextIds(s)
   lines.push(`次の ID: ${nx.C} / ${nx.Q}`)
   return lines.join('\n')

@@ -110,6 +110,18 @@ test('board_update の結果は短い要約（最近の決定・次の ID）と�
   expect(renderIds(s, ['C2', 'Q1'])).toBe('- C2（存在しない）\n- Q1 監査をどの範囲にかけるか')
 })
 
+test('board_update の結果の手順には、作業ごとの流れ（plan {question}）が出る', async () => {
+  // 作業を開くのと流れを置くのを1回の差分でまとめても、手順が「なし」にならない
+  const s = replay([{ utterance_id: 'τ1', relation: 'Open', ops: [
+    { op: 'open', id: 'Q0', question: '切り替える', owner: 'user', intent: { quote: ['切り替える'], reading: '作業場だけに入れる' } },
+    { op: 'plan', question: 'Q0', steps: [{ text: '開き直す', why: '起動時に読む' }, { text: '編集を確かめる', why: '目的の確認' }] },
+  ] }] as unknown as Diff[], 'plan')
+  expect(renderCompact(s).includes('手順: Q0 1. 開き直す ／ 2. 編集を確かめる')).toBe(true)
+  // 片付いた作業の流れは出さない
+  const done = apply(s, { utterance_id: 'τ2', relation: 'Result', ops: [{ op: 'answer', question: 'Q0', complete: true }] } as unknown as Diff)
+  expect(renderCompact(done).includes('手順: なし')).toBe(true)
+})
+
 test('apply は入力を変えない', async () => {
   const s = replay(diffs.slice(0, 3), 'audit')
   const before = JSON.stringify(s)
