@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 node_modules/
 .claude-plugin/types/
+
+test-results/
