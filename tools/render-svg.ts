@@ -8,11 +8,11 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { bandLine, nextStep, sections } from '../mod/intent-board/hooks/board'
-import type { Item, Section } from '../mod/intent-board/hooks/board'
-import { apply, board, replay } from '../mod/intent-board/hooks/state'
-import type { Diff } from '../mod/intent-board/hooks/state'
-import type { Flag } from '../mod/intent-board/types'
+import { bandLine, nextStep, sections } from '../mod/discourse-state/hooks/board'
+import type { Item, Section } from '../mod/discourse-state/hooks/board'
+import { apply, board, replay } from '../mod/discourse-state/hooks/state'
+import type { Diff } from '../mod/discourse-state/hooks/state'
+import type { Flag } from '../mod/discourse-state/types'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -80,30 +80,46 @@ const COLORS: Record<Tone, string> = {
 }
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-const rows: (Line | 'rule')[] = [...pane, 'rule', ...band, 'rule', { indent: 0, text: '> ', tone: 'white' }]
-const H = PAD * 2 + rows.length * LH + 30
-const W = PAD * 2 + COLS * CW + 20
-const body = rows.map((r, i) => {
-  const y = PAD + 30 + i * LH
-  if (r === 'rule') return `<line x1="${PAD}" y1="${y - LH / 2 + 4}" x2="${W - PAD}" y2="${y - LH / 2 + 4}" stroke="#30363d"/>`
-  if (!r.text) return ''
-  // 帯のボタンは文字の後ろに描く
-  const button = r === band[band.length - 1]
-    ? `<text x="${W - PAD}" y="${y}" text-anchor="end" fill="${COLORS.accent}">[ボードを閉じる]</text>` : ''
-  const parts = r.text.split(/(｜ 監査の指摘 \d+)/)
-  const spans = parts.map(p => p.startsWith('｜ 監査の指摘')
-    ? `<tspan fill="${COLORS.red}">${esc(p)}</tspan>` : esc(p)).join('')
-  return `<text x="${PAD + r.indent * 2 * CW}" y="${y}" fill="${COLORS[r.tone]}"${r.bold ? ' font-weight="bold"' : ''}>${spans}</text>${button}`
-}).join('\n')
-
-const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="${FONT}">
+// 1枚の SVG にする。button は帯の2行目の右端に描くボタンの文字
+const toSvg = (rows: (Line | 'rule')[], title: string, button: string, buttonRow: Line) => {
+  const H = PAD * 2 + rows.length * LH + 30
+  const W = PAD * 2 + COLS * CW + 20
+  const body = rows.map((r, i) => {
+    const y = PAD + 30 + i * LH
+    if (r === 'rule') return `<line x1="${PAD}" y1="${y - LH / 2 + 4}" x2="${W - PAD}" y2="${y - LH / 2 + 4}" stroke="#30363d"/>`
+    if (!r.text) return ''
+    const btn = r === buttonRow ? `<text x="${W - PAD}" y="${y}" text-anchor="end" fill="${COLORS.accent}">${esc(button)}</text>` : ''
+    const spans = r.text.split(/(｜ 監査の指摘 \d+)/)
+      .map(p => (p.startsWith('｜ 監査の指摘') ? `<tspan fill="${COLORS.red}">${esc(p)}</tspan>` : esc(p))).join('')
+    return `<text x="${PAD + r.indent * 2 * CW}" y="${y}" fill="${COLORS[r.tone]}"${r.bold ? ' font-weight="bold"' : ''}>${spans}</text>${btn}`
+  }).join('\n')
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="${FONT}">
 <rect width="${W}" height="${H}" rx="10" fill="#0d1117"/>
 <circle cx="${PAD + 6}" cy="${PAD}" r="6" fill="#ff5f56"/><circle cx="${PAD + 26}" cy="${PAD}" r="6" fill="#ffbd2e"/><circle cx="${PAD + 46}" cy="${PAD}" r="6" fill="#27c93f"/>
-<text x="${W / 2}" y="${PAD + 5}" text-anchor="middle" fill="${COLORS.gray}" font-size="13">意図ボード（例のデータ）</text>
+<text x="${W / 2}" y="${PAD + 5}" text-anchor="middle" fill="${COLORS.gray}" font-size="13">${esc(title)}</text>
 ${body}
 </svg>
 `
-const out = join(root, 'docs/board.svg')
-mkdirSync(dirname(out), { recursive: true })
-writeFileSync(out, svg)
-console.log(out)
+}
+
+const prompt: Line = { indent: 0, text: '> ', tone: 'white' }
+const lastBand = band[band.length - 1]!
+
+// ボードを開いた状態
+const opened = toSvg([...pane, 'rule', ...band, 'rule', prompt], 'ボードを開いた状態（例のデータ）', '[ボードを閉じる]', lastBand)
+
+// ボードを閉じた状態：会話の続きの上に、帯だけが出る
+const chat: Line[] = []
+push(chat, 0, '> 監査ジョブを組んで。最後にトップのエージェントが全カードを読むこと', 'gray')
+chat.push({ indent: 0, text: '', tone: 'white' })
+push(chat, 0, '● 監査ジョブを組んだよ。規準監査を回して、その結果を見る前に全カードを読み、直して再監査する流れにした。', 'white', false, 1)
+push(chat, 1, '⎿ ジョブの設定を書き出した（3件）', 'gray')
+chat.push({ indent: 0, text: '', tone: 'white' })
+const closed = toSvg([...chat, 'rule', ...band, 'rule', prompt], 'ボードを閉じた状態（例のデータ）', '[ボードを開く]', lastBand)
+
+mkdirSync(join(root, 'docs'), { recursive: true })
+for (const [name, svg] of [['board.svg', opened], ['board-closed.svg', closed]] as const) {
+  const out = join(root, 'docs', name)
+  writeFileSync(out, svg)
+  console.log(out)
+}

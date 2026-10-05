@@ -9,17 +9,17 @@ import { ATTRIBUTION_SYSTEM, attributionTargets, buildAttributionPrompt, buildDe
 import type { Audit, Flag } from './audit'
 import type { Diff } from './state'
 
-const PANE = 'intent-board'
+const PANE = 'discourse-state'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
 const FLAGGED = 'red'
 const ATTRIBUTION_MODEL = 'haiku'
 const DEVIATION_MODEL = 'sonnet'
-const seen = atom({ plugin: 'intent-board', key: 'seen' } as const, { board: null, changed: false, note: null, audit: [] } as Seen)
+const seen = atom({ plugin: 'discourse-state', key: 'seen' } as const, { board: null, changed: false, note: null, audit: [] } as Seen)
 // ペインが開いているか。帯のボタンの表示（開く／閉じる）を切り替える
-const opened = atom({ plugin: 'intent-board', key: 'opened' } as const, false)
+const opened = atom({ plugin: 'discourse-state', key: 'opened' } as const, false)
 // ペインの木で、既定の開閉から反転させた行のキー
-const expanded = atom({ plugin: 'intent-board', key: 'expanded' } as const, [] as string[])
+const expanded = atom({ plugin: 'discourse-state', key: 'expanded' } as const, [] as string[])
 
 let dir: string | null = null
 
@@ -112,7 +112,7 @@ async function runAudit($: EngineInterface) {
 // 本体はターンの終わりに board_update ツールで差分を渡し、mod が検証して足す。崩れていれば突き返す。
 
 const TOOL = 'board_update'
-const TOOL_FULL = 'mcp__intent-board__board_update'
+const TOOL_FULL = 'mcp__discourse-state__board_update'
 
 const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている、あなたの「いまの理解」）を更新する。
 ユーザーの発言を受けて意図の読み・決まったこと・流れが変わったターンでは、返信の終わりに必ず1回呼ぶ。変化が無ければ呼ばなくてよい。
@@ -161,7 +161,7 @@ async function applyFromAgent($: EngineInterface, input: Record<string, unknown>
 export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'intent-board', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
+    await $.command.register({ name: 'discourse-state', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
     await $.tool.register({
       name: TOOL,
       description: TOOL_DESCRIPTION,
@@ -182,15 +182,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // /intent-board は開く・閉じるの切り替え
-  on('command.run', { command: 'intent-board' }, async $ => {
+  // /discourse-state は開く・閉じるの切り替え
+  on('command.run', { command: 'discourse-state' }, async $ => {
     if (await read($, opened)) {
       await closePane($)
       return { text: '意図ボードを閉じた' }
     }
     await load($)
     await openPane($)
-    return { text: '意図ボードを開いた（帯のボタン・Esc・/intent-board で閉じる）' }
+    return { text: '意図ボードを開いた（帯のボタン・Esc・/discourse-state で閉じる）' }
   })
 
   on('ui.close', async ($, e, next) => {

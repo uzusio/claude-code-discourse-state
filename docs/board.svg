@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="744" height="994" viewBox="0 0 744 994" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
 <rect width="744" height="994" rx="10" fill="#0d1117"/>
 <circle cx="26" cy="20" r="6" fill="#ff5f56"/><circle cx="46" cy="20" r="6" fill="#ffbd2e"/><circle cx="66" cy="20" r="6" fill="#27c93f"/>
-<text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">意図ボード（例のデータ）</text>
+<text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">ボードを開いた状態（例のデータ）</text>
 <text x="20" y="50" fill="#58a6ff">[閉じる]</text>
 <text x="20" y="72" fill="#e6edf3" font-weight="bold">意図の読み</text>
 <text x="38" y="94" fill="#8b949e">「委任したトップのエージェントが最後に責任をもって全カードを読むべき」</text>

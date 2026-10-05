@@ -42,13 +42,13 @@ test('ボードが無いとき、帯は出さずペインは案内を出す（te
   })
   for (const surface of ['terminal', 'vscode'] as const) {
     const pane = await $.ui.mount({
-      plugin: 'intent-board', surface, component: 'Pane', requestId: 'intent-board',
+      plugin: 'discourse-state', surface, component: 'Pane', requestId: 'discourse-state',
       props: { title: '意図ボード', isFocused: true, bodyColumns: 80, placement: 'dock' } as any,
     })
     expect(await pane.find({ type: 'Text', text: /まだボードがない/ })).toBeDefined()
     await pane.unmount()
     const band = await $.ui.mount({
-      plugin: 'intent-board', surface, component: 'AbovePrompt',
+      plugin: 'discourse-state', surface, component: 'AbovePrompt',
       props: { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 120 } as any,
     })
     expect(await band.find({ key: 'supplemented' })).toBeUndefined()
