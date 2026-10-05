@@ -59,6 +59,8 @@ export type Section = {
   groups?: { key: string; title: string; closed: boolean; items: Item[] }[]  // 決まったことの問いごとのまとまり
 }
 
+const FLAG_LABEL: Record<Flag['kind'], string> = { deviation: '食い違い', attribution: '出どころ', relevance: '問いへの答え', unclosed: '問いの閉じ方' }
+
 // flipped は「既定の開閉から反転させた見出し」のキー
 export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly Flag[] = []): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
@@ -87,7 +89,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
       key: 'audit',
       title: `監査の指摘（${audit.length}）`,
       tone: 'flagged',
-      items: audit.map((f, i) => ({ key: `a:${i}`, text: `${f.kind === 'deviation' ? '食い違い' : '出どころ'}：${f.text}`, tone: 'flagged' as const })),
+      items: audit.map((f, i) => ({ key: `a:${i}`, text: `${FLAG_LABEL[f.kind]}：${f.text}`, tone: 'flagged' as const })),
     })
 
   // 2. 流れ

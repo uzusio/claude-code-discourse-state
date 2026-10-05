@@ -4,7 +4,8 @@
 //   食い違い（sonnet） … そのターンの本体の返信・作業が、本体の書いたボード（読み・決まったこと・流れ）と矛盾していないか
 import type { State } from './state'
 
-export type Flag = { kind: 'attribution' | 'deviation'; text: string }
+// relevance：返信がいまの問いに答えていない（QUD の関連性）／unclosed：答えの出た問いが開いたまま、または答えが無いのに閉じた
+export type Flag = { kind: 'attribution' | 'deviation' | 'relevance' | 'unclosed'; text: string }
 export type Audit = { turn: number; flags: Flag[] }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…（以下略）` : s)
@@ -69,11 +70,14 @@ export const parseAttribution = (text: string, items: { id: string; content: str
 
 // ---------------------------------------------------------------- 食い違い
 
-export const DEVIATION_SYSTEM = `あなたは監査係。AI アシスタントが自分で書いた「理解のボード」（ユーザーの意図の読み・決まったこと・これからの流れ）と、そのターンの AI の返信と作業を受け取る。
-AI の返信や作業が、ボードに書かれた読み・決まったこと・流れと矛盾しているところだけを挙げる。
-- 挙げるもの：決まったことに反するやり方をした、意図の読みと違う方向の作業をした、流れに無い手順を断りなく進めた、など
-- 挙げないもの：ボードに無いが矛盾もしない細部、言い回しの違い、ボードを更新したうえでの変更
-迷ったら挙げない。出力は JSON だけ: {"flags": [{"text": "何が何と食い違っているかを1文で"}]}`
+export const DEVIATION_SYSTEM = `あなたは監査係。AI アシスタントが自分で書いた「理解のボード」（ユーザーの意図の読み・決まったこと・これからの流れ・問い）と、そのターンのユーザーの発言、AI の返信と作業を受け取る。
+次の3種類だけを挙げる。どれも、ユーザーの意図を AI が読み違えている兆しとして挙げる。
+1. deviation：AI の返信や作業が、ボードの読み・決まったこと・流れと矛盾している（決まったことに反するやり方、読みと違う方向の作業、流れに無い手順を断りなく進めた）
+2. relevance：AI の返信が、ユーザーのこのターンの発言が求めたこと（問い・依頼）に答えていない。別の問いに答えている、または一部にしか答えていないのに答えた扱いにしている
+3. unclosed：このターンで答えが出た問いがボードで開いたまま、または答えが出ていない問いが閉じられている
+挙げないもの：矛盾しない細部、言い回しの違い、ボードを更新したうえでの変更。迷ったら挙げない。
+各指摘は、ユーザーが読んで分かるように「意図の読みが〜かもしれない」の形で、何と何がずれているかを具体的に1〜2文で書く。
+出力は JSON だけ: {"flags": [{"kind": "deviation" | "relevance" | "unclosed", "text": "..."}]}`
 
 export const buildDeviationPrompt = (s: State, x: Exchange) => {
   const decided = s.commitments.filter(c => c.by === 'user').slice(-20)
@@ -86,6 +90,11 @@ export const buildDeviationPrompt = (s: State, x: Exchange) => {
     '',
     '## ボード：これからの流れ',
     ...(s.steps.length ? s.steps.map((st, i) => `${i + 1}. ${st.text}`) : ['（なし）']),
+    '',
+    '## ボード：開いている問い',
+    ...(s.questions.filter(q => !q.closed).map(q => `- ${q.question}`)),
+    '## ボード：最近閉じた問い',
+    ...(s.questions.filter(q => q.closed).slice(-5).map(q => `- ${q.question}`)),
     '',
     '## このターンのユーザーの発言',
     clip(x.user, 3000),
@@ -101,7 +110,10 @@ export const buildDeviationPrompt = (s: State, x: Exchange) => {
 export const parseDeviation = (text: string): Flag[] | null => {
   const v = parseJson(text)
   if (!Array.isArray(v?.flags)) return null
-  return v.flags.filter((f: any) => f && typeof f.text === 'string' && f.text.trim()).map((f: any) => ({ kind: 'deviation' as const, text: f.text }))
+  const kinds = ['deviation', 'relevance', 'unclosed'] as const
+  return v.flags
+    .filter((f: any) => f && typeof f.text === 'string' && f.text.trim())
+    .map((f: any) => ({ kind: kinds.includes(f.kind) ? (f.kind as Flag['kind']) : 'deviation', text: f.text }))
 }
 
 // 返答から JSON を取り出す。コードフェンスや前置きが付いていても拾う

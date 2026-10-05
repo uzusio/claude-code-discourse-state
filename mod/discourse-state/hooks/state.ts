@@ -25,7 +25,8 @@ export type Diff = {
   target?: string | null; markers?: string[]; ops?: Op[]
 }
 
-export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge']
+// Contrast（並べるだけ・取り消さない）・Explanation（理由づけ）・Clarification（確かめる問い）は 2026-10-05 に SDRT から追加
+export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge', 'Contrast', 'Explanation', 'Clarification']
 export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'goal', 'plan', 'none']
 const BY = ['user', 'claude']
 const ID_RE = /^([CQ])(\d+)$/
@@ -128,6 +129,10 @@ export const validate = (s: State, diff: Diff): string[] => {
   if (rel === 'Acknowledge' && kinds.some(k => k !== 'none' && k !== 'confirm')) problems.push('Acknowledge なのに状態を変える op がある')
   if (rel === 'Open' && !kinds.includes('open')) problems.push('Open なのに open が無い')
   if (rel === 'Answer' && !kinds.includes('answer')) problems.push('Answer なのに answer が無い')
+  if (rel === 'Contrast' && kinds.includes('retract')) problems.push('Contrast は取り消さない（取り消すなら Correction）')
+  if (rel === 'Explanation' && !diff.target && !ops.some(o => o.op === 'add' && (o.depends_on ?? []).length))
+    problems.push('Explanation には理由づけの対象（target か depends_on）が要る')
+  if (rel === 'Clarification' && !kinds.includes('open')) problems.push('Clarification なのに open が無い')
   return problems
 }
 

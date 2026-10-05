@@ -16,7 +16,7 @@ export type Board = {
 }
 // changed：直前のターンの終わりで、ボードの中身が変わったか
 // audit：直近のターンの監査役の指摘（ボードは書き換えない）
-export type Flag = { kind: 'attribution' | 'deviation'; text: string }
+export type Flag = { kind: 'attribution' | 'deviation' | 'relevance' | 'unclosed'; text: string }
 export type Seen = { board: Board | null; changed: boolean; note: string | null; audit: Flag[] }
 
 declare module 'claude-code' {

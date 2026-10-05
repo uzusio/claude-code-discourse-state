@@ -33,6 +33,16 @@ test('取り消したものに依存している決定を放置すると弾く',
   expect(p.some(x => x.includes('C1 は C0 に依存'))).toBe(true)
 })
 
+test('足した関係：対比は取り消さない、理由づけには対象、確認の問いは問いを開く', async () => {
+  const s = replay(diffs, 'audit')
+  const v = (d: Diff) => validate(s, { turn: 4, utterance_id: 'π4', ...d })
+  expect(v({ relation: 'Contrast', ops: [{ op: 'add', id: 'C6', content: 'ただし通知は朝', depends_on: ['C5'] }] })).toEqual([])
+  expect(v({ relation: 'Contrast', ops: [{ op: 'retract', id: 'C5' }] }).some(x => x.includes('Contrast は取り消さない'))).toBe(true)
+  expect(v({ relation: 'Explanation', ops: [{ op: 'add', id: 'C6', content: '寝ている間に終わらせたいから' }] }).some(x => x.includes('理由づけの対象'))).toBe(true)
+  expect(v({ relation: 'Explanation', target: 'C5', ops: [{ op: 'add', id: 'C6', content: '寝ている間に終わらせたいから' }] })).toEqual([])
+  expect(v({ relation: 'Clarification', ops: [{ op: 'none' }] }).some(x => x.includes('Clarification なのに open'))).toBe(true)
+})
+
 test('ペイン：意図の読み → 流れ → あなたが決めること を先に出し、履歴（補った前提を含む）はたたむ', async () => {
   let s = replay(diffs, 'audit')
   s = apply(s, {

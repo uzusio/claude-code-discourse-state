@@ -35,6 +35,6 @@ test('食い違い：ボードと作業をプロンプトに入れ、指摘だ�
   const p = buildDeviationPrompt(s, { user: '進めて', recentUser: ['進めて'], prevAssistant: '', assistant: '規準監査を飛ばしてカードを読んだ', tools: [] })
   expect(p.includes('1. 規準監査（sonnet）')).toBe(true)
   expect(p.includes('監査はユーザーが指示したときだけ')).toBe(true)
-  expect(parseDeviation('{"flags": [{"text": "流れでは規準監査が先なのに飛ばした"}]}')).toEqual([{ kind: 'deviation', text: '流れでは規準監査が先なのに飛ばした' }])
+  expect(parseDeviation('{"flags": [{"text": "流れでは規準監査が先なのに飛ばした"}, {"kind": "relevance", "text": "範囲を聞かれたのに時刻に答えている"}]}')).toEqual([{ kind: 'deviation', text: '流れでは規準監査が先なのに飛ばした' }, { kind: 'relevance', text: '範囲を聞かれたのに時刻に答えている' }])
   expect(parseDeviation('{"flags": []}')).toEqual([])
 })

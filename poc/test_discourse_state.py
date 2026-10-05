@@ -116,6 +116,26 @@ class Validate(unittest.TestCase):
         d2 = {"turn": 3, "utterance_id": "π3", "relation": "Acknowledge", "ops": [{"op": "retract", "id": "C1"}]}
         self.assertTrue(validate(after_pi2(), d2))
 
+    def test_contrast_does_not_retract(self):
+        """「でも」で並べるだけなら取り消さない。取り消すなら Correction。"""
+        ok = {"turn": 3, "utterance_id": "π3", "relation": "Contrast",
+              "ops": [{"op": "add", "id": "C3", "content": "ただし A は後回し", "depends_on": ["C2"]}]}
+        self.assertEqual(validate(after_pi2(), ok), [])
+        bad = {"turn": 3, "utterance_id": "π3", "relation": "Contrast",
+               "ops": [{"op": "retract", "id": "C2"}]}
+        self.assertTrue(any("Contrast は取り消さない" in p for p in validate(after_pi2(), bad)))
+
+    def test_explanation_needs_target(self):
+        bad = {"turn": 3, "utterance_id": "π3", "relation": "Explanation",
+               "ops": [{"op": "add", "id": "C3", "content": "公開するから"}]}
+        self.assertTrue(any("理由づけの対象" in p for p in validate(after_pi2(), bad)))
+        ok = dict(bad, target="C2")
+        self.assertEqual(validate(after_pi2(), ok), [])
+
+    def test_clarification_opens_a_question(self):
+        bad = {"turn": 3, "utterance_id": "π3", "relation": "Clarification", "ops": [{"op": "none"}]}
+        self.assertTrue(any("Clarification なのに open" in p for p in validate(after_pi2(), bad)))
+
 
 class Purity(unittest.TestCase):
     def test_apply_does_not_mutate_input(self):

@@ -119,7 +119,7 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 ボードはあなたの頭の中をそのまま見せるもの。あなた自身の理解を書く。
 
 渡すのは差分1つ：{"relation": 関係, "ops": [操作, ...]}
-関係：Correction（前の決定を取り消す・置き換える）／Elaboration（詳しくする）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（問いを開く）／Acknowledge（受け取るだけ）
+関係：Correction（前の決定を取り消す・置き換える）／Contrast（「でも」で並べるだけ。取り消さない）／Elaboration（詳しくする）／Explanation（「〜だから」。理由づけ。target か depends_on で対象を示す）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（問いを開く）／Clarification（言葉の意味・範囲を確かめる問い）／Acknowledge（受け取るだけ）
 操作：
 - goal {quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"} … 意図の読みができた・変わったとき
 - plan {steps:[{text, from:["goal" か C の id], why:"なぜこの手順か（30字以内）"}]} … これからの流れ。全体を置き換える。終わった手順は外す

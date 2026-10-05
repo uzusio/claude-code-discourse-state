@@ -45,7 +45,11 @@ import re
 from typing import Any, Iterable
 
 RELATIONS = frozenset(
-    {"Correction", "Elaboration", "Continuation", "Result", "Condition", "Answer", "Open", "Acknowledge"}
+    {"Correction", "Elaboration", "Continuation", "Result", "Condition", "Answer", "Open", "Acknowledge",
+     # 2026-10-05 追加（SDRT から、読みの精度に効くもの）
+     "Contrast",       # 「でも」で並べるだけ。取り消さない（取り消すなら Correction）
+     "Explanation",    # 「〜だから」。既存の決定・問いへの理由づけ
+     "Clarification"}  # 言葉の意味・範囲を確かめる問い
 )
 OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "goal", "plan", "none"})
 BY = frozenset({"user", "claude"})
@@ -215,6 +219,12 @@ def validate(state: dict, diff: dict) -> list[str]:
         problems.append("Open なのに open が無い")
     if rel == "Answer" and "answer" not in kinds:
         problems.append("Answer なのに answer が無い")
+    if rel == "Contrast" and any(k == "retract" for k in kinds):
+        problems.append("Contrast は取り消さない（取り消すなら Correction）")
+    if rel == "Explanation" and not diff.get("target") and not any(op.get("depends_on") for op in ops if op.get("op") == "add"):
+        problems.append("Explanation には理由づけの対象（target か depends_on）が要る")
+    if rel == "Clarification" and "open" not in kinds:
+        problems.append("Clarification なのに open が無い")
     return problems
 
 
