@@ -1,17 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="744" height="334" viewBox="0 0 744 334" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
-<rect width="744" height="334" rx="10" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="744" height="312" viewBox="0 0 744 312" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
+<rect width="744" height="312" rx="10" fill="#0d1117"/>
 <circle cx="26" cy="20" r="6" fill="#ff5f56"/><circle cx="46" cy="20" r="6" fill="#ffbd2e"/><circle cx="66" cy="20" r="6" fill="#27c93f"/>
-<text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">ボードを閉じた状態（例のデータ）</text>
-<text x="20" y="50" fill="#8b949e">&gt; 監査ジョブを組んで。最後にトップのエージェントが全カードを読むこと</text>
+<text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">ボードを閉じた状態</text>
+<text x="20" y="50" fill="#8b949e">&gt; 帯とボードで、Claude の読みを見られるようにして</text>
 
-<text x="20" y="94" fill="#e6edf3">● 監査ジョブを組んだよ。規準監査を回して、その結果を見る前に全カードを読み、</text>
-<text x="38" y="116" fill="#e6edf3">直して再監査する流れにした。</text>
-<text x="38" y="138" fill="#8b949e">⎿ ジョブの設定を書き出した（3件）</text>
+<text x="20" y="94" fill="#e6edf3">● プロンプトの上に意図の読みと次の一歩を出して、詳しくはボタンで開くボード</text>
+<text x="38" y="116" fill="#e6edf3">に分けたよ。</text>
+<text x="38" y="138" fill="#8b949e">⎿ 帯とボードを描く mod を書いた</text>
 
 <line x1="20" y1="175" x2="724" y2="175" stroke="#30363d"/>
-<text x="20" y="204" fill="#e6edf3">意図：ルールでは拾えない「これおかしいだろ」を、ユーザーの代わりに拾って、責</text>
-<text x="20" y="226" fill="#e6edf3">任をもって納品判断する</text>
-<text x="20" y="248" fill="#8b949e">次：規準監査（sonnet）（ほか 2）   <tspan fill="#f85149">｜ 監査の指摘 1</tspan></text><text x="724" y="248" text-anchor="end" fill="#58a6ff">[ボードを開く]</text>
-<line x1="20" y1="263" x2="724" y2="263" stroke="#30363d"/>
-<text x="20" y="292" fill="#e6edf3">&gt; </text>
+<text x="20" y="204" fill="#e6edf3">意図：Claude の意図の読みを会話中に見せ、ずれを見つけられるようにする</text>
+<text x="20" y="226" fill="#8b949e">次：帯に意図の読みと次の一歩を出す（ほか 2）   <tspan fill="#f85149">｜ 監査の指摘 1</tspan></text><text x="724" y="226" text-anchor="end" fill="#58a6ff">[ボードを開く]</text>
+<line x1="20" y1="241" x2="724" y2="241" stroke="#30363d"/>
+<text x="20" y="270" fill="#e6edf3">&gt; </text>
 </svg>

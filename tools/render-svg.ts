@@ -1,6 +1,7 @@
 // README 用に、意図ボード（帯とペイン）を SVG に描き出す。
 // 並びと中身は mod と同じ関数（sections / bandLine / nextStep）から作るので、mod の表示とずれない。
-// 中身は例のデータ（poc/examples/audit_job.jsonl）。会話の実データは使わない。
+// 中身は自己言及の例（poc/examples/self.jsonl）：「Claude の意図の読みを見たい」と頼まれて、このボードを作る会話そのもの。
+// 会話の実データは使わない。
 //
 // 使い方（リポジトリの直下で）: npx tsx tools/render-svg.ts
 // 出力: docs/board.svg
@@ -10,22 +11,18 @@ import { fileURLToPath } from 'node:url'
 
 import { bandLine, nextStep, sections } from '../mod/discourse-state/hooks/board'
 import type { Item, Section } from '../mod/discourse-state/hooks/board'
-import { apply, board, replay } from '../mod/discourse-state/hooks/state'
+import { board, replay } from '../mod/discourse-state/hooks/state'
 import type { Diff } from '../mod/discourse-state/hooks/state'
 import type { Flag } from '../mod/discourse-state/types'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 // ---------------------------------------------------------------- 例のデータ
-const diffs = readFileSync(join(root, 'poc/examples/audit_job.jsonl'), 'utf-8')
+const diffs = readFileSync(join(root, 'poc/examples/self.jsonl'), 'utf-8')
   .split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l) as Diff)
-// 見せ場を足す：決める人がユーザーの問い
-const state = apply(replay(diffs, 'example'), {
-  turn: 4, utterance_id: 'τ4', relation: 'Open',
-  ops: [{ op: 'open', id: 'Q2', question: '監査の結果をどこに通知するか', parent: 'Q0', owner: 'user' }],
-})
-const b = board(state)
-const audit: Flag[] = [{ kind: 'deviation', text: '流れでは規準監査が先なのに、結果を待たずにカードを読み始めている' }]
+const b = board(replay(diffs, 'example'))
+// 監査の指摘の見本：訂正で「作業の前後は問わない」になったのに、返信がまだ作業前の確認を求めている
+const audit: Flag[] = [{ kind: 'deviation', text: '意図の読みがずれているかもしれない：「作業の前後は問わない」に直ったのに、返信はまだ作業を始める前の確認を求めている' }]
 
 // ---------------------------------------------------------------- 行に起こす（register.tsx の描き方に合わせる）
 type Tone = 'white' | 'gray' | 'yellow' | 'red' | 'cyan' | 'accent'
@@ -106,16 +103,16 @@ const prompt: Line = { indent: 0, text: '> ', tone: 'white' }
 const lastBand = band[band.length - 1]!
 
 // ボードを開いた状態
-const opened = toSvg([...pane, 'rule', ...band, 'rule', prompt], 'ボードを開いた状態（例のデータ）', '[ボードを閉じる]', lastBand)
+const opened = toSvg([...pane, 'rule', ...band, 'rule', prompt], 'ボードを開いた状態', '[ボードを閉じる]', lastBand)
 
 // ボードを閉じた状態：会話の続きの上に、帯だけが出る
 const chat: Line[] = []
-push(chat, 0, '> 監査ジョブを組んで。最後にトップのエージェントが全カードを読むこと', 'gray')
+push(chat, 0, '> 帯とボードで、Claude の読みを見られるようにして', 'gray')
 chat.push({ indent: 0, text: '', tone: 'white' })
-push(chat, 0, '● 監査ジョブを組んだよ。規準監査を回して、その結果を見る前に全カードを読み、直して再監査する流れにした。', 'white', false, 1)
-push(chat, 1, '⎿ ジョブの設定を書き出した（3件）', 'gray')
+push(chat, 0, '● プロンプトの上に意図の読みと次の一歩を出して、詳しくはボタンで開くボードに分けたよ。', 'white', false, 1)
+push(chat, 1, '⎿ 帯とボードを描く mod を書いた', 'gray')
 chat.push({ indent: 0, text: '', tone: 'white' })
-const closed = toSvg([...chat, 'rule', ...band, 'rule', prompt], 'ボードを閉じた状態（例のデータ）', '[ボードを開く]', lastBand)
+const closed = toSvg([...chat, 'rule', ...band, 'rule', prompt], 'ボードを閉じた状態', '[ボードを開く]', lastBand)
 
 mkdirSync(join(root, 'docs'), { recursive: true })
 for (const [name, svg] of [['board.svg', opened], ['board-closed.svg', closed]] as const) {
