@@ -1,4 +1,4 @@
-import type { Board, Flag } from '../types'
+import type { Board, Flag, Task, TaskItem } from '../types'
 
 // board.json の置き場：<一時フォルダ>/discourse-state/<セッション id>/board.json
 export const boardPath = (tmp: string, sessionId: string) =>
@@ -10,8 +10,9 @@ export const parseBoard = (text: string | undefined): Board | null => {
   try {
     const b = JSON.parse(text)
     if (!b || !Array.isArray(b.decided) || !Array.isArray(b.supplemented)) return null
-    // 木の無い古い形は、全部を目的の直下に置く
+    // 古い形（木・作業の無いもの）でも描けるように埋める
     if (!b.tree) b.tree = { nodes: [], loose: [...b.decided, ...b.supplemented].map((c: { id: string }) => c.id) }
+    if (!Array.isArray(b.tasks)) b.tasks = []
     return b as Board
   } catch {
     return null
@@ -31,147 +32,127 @@ export const clip = (s: string, width: number) => {
   return out
 }
 
-// 帯：目的の読み（width 桁まで）・補った前提の数・開いている問いの数
-export const bandLine = (b: Board, width = 60) => {
-  const goal = b.goal ? clip(b.goal.reading, width) : '目的：未設定'
-  return { goal, supplemented: b.supplemented.length, open: b.open.length }
+// いま扱っている作業：いちばん新しい開いている問いから、意図を持つ作業まで親をたどる
+export const focusTask = (b: Board): Task | null => {
+  const byId = new Map(b.tasks.map(t => [t.id, t]))
+  let t = b.open.length ? byId.get(b.open[0]!.id) ?? null : null
+  while (t && !t.intent) t = t.parent ? byId.get(t.parent) ?? null : null
+  return t
 }
+
+// 帯の1行目：いま扱っている作業の意図の読み（width 桁まで）。作業に意図が無ければ旧い会話全体の目的
+export const bandLine = (b: Board, width = 60) => {
+  const reading = focusTask(b)?.intent?.reading ?? b.goal?.reading
+  return { goal: reading ? clip(reading, width) : '意図：まだ読めていない', supplemented: b.supplemented.length, open: b.open.length }
+}
+
+// 帯の2行目：流れの次の一歩
+export const nextStep = (b: Board) => (b.steps.length ? `次：${b.steps[0]!.text}${b.steps.length > 1 ? `（ほか ${b.steps.length - 1}）` : ''}` : null)
 
 // ---------------------------------------------------------------- ペインの中身（描画は register.tsx）
 //
-// このツールの中心は「Claude がユーザーの意図をどう読み、それをどんな流れに落としているか」。
-// 上から：
-//   1. 意図の読み … ユーザーの言葉（引用）と Claude の読み、いま扱っている問い
-//   2. 流れ       … 手順ごとに「なぜこの手順か」と、どの意図から出たか。
-//                    文脈の補完（ユーザーが言っていない前提）に乗っている手順には、それを黄色で添える
-//   3. あなたが決めること
-//   4. 履歴（決まったこと・文脈の補完・置き換わったこと）… 参照用。たたんでおく
-// 文脈の補完は読みがずれる原因の1つとして黄色で管理するが、中心には置かない。
+// 中心は「作業ごとの意図」。作業は木（作業の分解）で、各作業の下に意図の読みと、決まったことがぶら下がる。
+// 決まったこと同士の線には関係ラベル（答え・補足・理由・対比・結果・条件）。訂正で置き換えたものは置き換え元を添える。
+// 文脈の補完（Claude が補った前提）は黄色、監査の指摘は赤。片付いた作業と、置き換えの履歴はたたむ。
 // id（C12 など）は人が使わないので出さない。
 
-export type Item = { key: string; text: string; sub?: string[]; tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' | 'flagged' }
+export type Item = {
+  key: string
+  text: string
+  sub?: string[]
+  tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' | 'flagged' | 'task'
+  indent?: number                  // 字下げの段（木の深さ）
+  toggle?: { open: boolean }       // 押すと開閉する行（作業の見出し）
+}
 export type Section = {
   key: string
   title: string
   tone?: 'supplemented' | 'dim' | 'flagged'
-  collapsible?: { open: boolean }   // 見出しを押すと開閉する
+  collapsible?: { open: boolean }
   items: Item[]
-  groups?: { key: string; title: string; closed: boolean; items: Item[] }[]  // 決まったことの問いごとのまとまり
 }
 
+export const REL_LABEL: Record<TaskItem['rel'], string> = {
+  answer: '答え', elaboration: '補足', explanation: '理由', contrast: '対比', result: '結果', condition: '条件',
+}
 const FLAG_LABEL: Record<Flag['kind'], string> = { deviation: '食い違い', attribution: '出どころ', relevance: '問いへの答え', unclosed: '問いの閉じ方' }
+const who = (owner: 'user' | 'claude') => (owner === 'user' ? 'あなた' : 'Claude')
 
-// flipped は「既定の開閉から反転させた見出し」のキー
+// flipped は「既定の開閉から反転させた行・見出し」のキー
 export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly Flag[] = []): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
-  const decided = new Map(b.decided.map(c => [c.id, c] as const))
-  const supplemented = new Map(b.supplemented.map(c => [c.id, c] as const))
-  const isNew = (c: { turn: number }) => c.turn === b.turn
   const out: Section[] = []
 
-  // 1. 意図の読み
-  const focus = b.open[0]
-  out.push({
-    key: 'reading',
-    title: '意図の読み',
-    items: b.goal
-      ? [
-          ...b.goal.quote.map((q, i) => ({ key: `quote:${i}`, text: `「${q}」`, tone: 'quote' as const })),
-          { key: 'reading', text: b.goal.reading, tone: 'strong' as const },
-          ...(focus ? [{ key: 'focus', text: `いま扱っている問い：${focus.question}` }] : []),
-        ]
-      : [{ key: 'reading-none', text: 'まだ読めていない', tone: 'dim' as const }],
-  })
-
-  // 監査の指摘（赤）。ボードは書き換えていない。直すのは本体かユーザー
+  // 監査の指摘（赤）。ボードは書き換えていない
   if (audit.length)
     out.push({
-      key: 'audit',
-      title: `監査の指摘（${audit.length}）`,
-      tone: 'flagged',
+      key: 'audit', title: `監査の指摘（${audit.length}）`, tone: 'flagged',
       items: audit.map((f, i) => ({ key: `a:${i}`, text: `${FLAG_LABEL[f.kind]}：${f.text}`, tone: 'flagged' as const })),
     })
 
-  // 2. 流れ
-  if (b.steps.length) {
-    out.push({
-      key: 'flow',
-      title: '流れ',
-      items: b.steps.map((st, i) => {
-        const basis = st.from
-          .map(f => (f === 'goal' ? '目的' : decided.has(f) ? `「${decided.get(f)!.content}」` : null))
-          .filter((x): x is string => x !== null)
-        const premises = st.from.map(f => supplemented.get(f)).filter(c => c !== undefined)
+  // 作業の木
+  const items: Item[] = []
+  const children = (parent: string | null) => b.tasks.filter(t => t.parent === parent)
+  const task = (t: Task, depth: number) => {
+    const key = `t:${t.id}`
+    const decided = t.items.length
+    const open = isOpen(key, !t.closed)
+    items.push({
+      key, indent: depth, tone: 'task', toggle: { open },
+      text: t.closed ? `✓ ${t.question}（決まったこと ${decided}）` : `${t.question}（決める人：${who(t.owner)}）`,
+    })
+    if (!open) return
+    if (t.intent) {
+      items.push({ key: `${key}:reading`, indent: depth + 1, tone: 'strong', text: `意図：${t.intent.reading}` })
+      for (const [i, q] of t.intent.quote.entries()) items.push({ key: `${key}:quote:${i}`, indent: depth + 2, tone: 'quote', text: `「${q}」` })
+    }
+    const edge = (parent: string | null, d: number) => {
+      for (const it of t.items.filter(x => x.parent === parent)) {
+        const sup = it.by === 'claude'
         const sub = [
-          ...(st.why ? [st.why] : []),
-          ...(basis.length ? [`← ${basis.join('・')}`] : []),
-          ...premises.map(c => `文脈の補完：${c!.content}${c!.reason ? `（${c!.reason}）` : ''}`),
+          ...(it.replaces ? [`「${it.replaces}」を置き換え`] : []),
+          ...(sup && it.reason ? [`補った理由：${it.reason}`] : []),
         ]
-        return { key: `p:${i}`, text: `${i + 1}. ${st.text}`, sub }
+        items.push({
+          key: `c:${it.id}`, indent: d,
+          text: `${it.turn === b.turn ? '新 ' : ''}${REL_LABEL[it.rel]}${sup ? '（補完）' : ''}：${it.content}`,
+          tone: sup ? 'supplemented' : it.turn === b.turn ? 'new' : undefined,
+          ...(sub.length ? { sub } : {}),
+        })
+        edge(it.id, d + 1)
+      }
+    }
+    edge(null, depth + 1)
+    for (const c of children(t.id)) task(c, depth + 1)
+  }
+  for (const r of children(null)) task(r, 0)
+  if (items.length) out.push({ key: 'tasks', title: '作業と意図', items })
+
+  // 流れ
+  if (b.steps.length) {
+    const content = new Map([...b.decided, ...b.supplemented].map(c => [c.id, c.content] as const))
+    out.push({
+      key: 'flow', title: '流れ',
+      items: b.steps.map((st, i) => {
+        const basis = st.from.map(f => (f === 'goal' ? null : content.get(f))).filter((x): x is string => !!x).map(x => `「${x}」`)
+        return { key: `p:${i}`, text: `${i + 1}. ${st.text}`, sub: [...(st.why ? [st.why] : []), ...(basis.length ? [`← ${basis.join('・')}`] : [])] }
       }),
     })
   }
 
-  // 3. あなたが決めること
-  // 決めごとは、子の問いを持たない（＝話題そのものではない）ユーザーの問いだけ
-  const mine = b.open.filter(q => q.owner === 'user' && !b.tree.nodes.some(n => n.parent === q.id))
-  if (mine.length)
-    out.push({ key: 'mine', title: `あなたが決めること（${mine.length}）`, items: mine.map(q => ({ key: `q:${q.id}`, text: q.question })) })
-
-  // 4. 履歴
-  if (b.decided.length) {
-    const open = isOpen('decided', false)
-    const item = (id: string): Item => {
-      const c = decided.get(id)!
-      return { key: `c:${id}`, text: c.content, tone: isNew(c) ? 'new' : undefined }
-    }
-    const groups = open
-      ? [
-          ...[...b.tree.nodes].reverse()
-            .map(n => ({ key: `g:${n.id}`, title: n.question, closed: n.closed, items: n.items.filter(id => decided.has(id)).map(item) }))
-            .filter(g => g.items.length),
-          ...(b.tree.loose.some(id => decided.has(id))
-            ? [{ key: 'g:loose', title: 'その他', closed: false, items: b.tree.loose.filter(id => decided.has(id)).map(item) }]
-            : []),
-        ]
-      : []
-    out.push({ key: 'decided', title: `決まったこと（${b.decided.length}）`, tone: 'dim', collapsible: { open }, items: [], groups })
-  }
-
-  if (b.supplemented.length) {
-    const open = isOpen('supplemented', false)
-    const fresh = b.supplemented.filter(isNew).length
-    out.push({
-      key: 'supplemented',
-      title: `文脈の補完（${b.supplemented.length}${fresh ? `・うち新しく ${fresh}` : ''}）`,
-      tone: 'supplemented',
-      collapsible: { open },
-      items: open
-        ? [...b.supplemented].reverse().map(c => ({
-            key: `s:${c.id}`, text: `${isNew(c) ? '新 ' : ''}${c.content}`, sub: c.reason ? [c.reason] : [], tone: 'supplemented' as const,
-          }))
-        : [],
-    })
-  }
-
+  // 置き換わったこと（履歴）
   if (b.replaced.length) {
     const open = isOpen('replaced', false)
+    const content = new Map([...b.decided, ...b.supplemented].map(c => [c.id, c.content] as const))
     out.push({
       key: 'replaced', title: `置き換わったこと（${b.replaced.length}）`, tone: 'dim', collapsible: { open },
       items: open
         ? b.replaced.map(r => ({
-            key: `x:${r.id}`,
-            text: r.content,
-            sub: [r.replaced_by ? `→ ${decided.get(r.replaced_by)?.content ?? supplemented.get(r.replaced_by)?.content ?? '（その後さらに変わった）'}` : '→ 取り消し'],
-            tone: 'dim' as const,
+            key: `x:${r.id}`, text: r.content, tone: 'dim' as const,
+            sub: [r.replaced_by ? `→ ${content.get(r.replaced_by) ?? '（その後さらに変わった）'}` : '→ 取り消し'],
           }))
         : [],
     })
   }
   return out
 }
-
-// 帯の2行目：流れの次の一歩
-export const nextStep = (b: Board) => (b.steps.length ? `次：${b.steps[0]!.text}${b.steps.length > 1 ? `（ほか ${b.steps.length - 1}）` : ''}` : null)
-
-export const who =(owner: 'user' | 'claude') => (owner === 'user' ? 'ユーザー' : 'Claude が決めて事後報告')

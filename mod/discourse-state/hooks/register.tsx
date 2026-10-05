@@ -121,12 +121,13 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 渡すのは差分1つ：{"relation": 関係, "ops": [操作, ...]}
 関係：Correction（前の決定を取り消す・置き換える）／Contrast（「でも」で並べるだけ。取り消さない）／Elaboration（詳しくする）／Explanation（「〜だから」。理由づけ。target か depends_on で対象を示す）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（問いを開く）／Clarification（言葉の意味・範囲を確かめる問い）／Acknowledge（受け取るだけ）
 操作：
-- goal {quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"} … 意図の読みができた・変わったとき
+- intent {question:"Q番号", quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"} … その作業（問い）の意図の読みができた・変わったとき。意図は会話全体ではなく作業ごとに持つ。読み手・調子・範囲など、自分が無意識に置いている前提も読みに含める
 - plan {steps:[{text, from:["goal" か C の id], why:"なぜこの手順か（30字以内）"}]} … これからの流れ。全体を置き換える。終わった手順は外す
-- add {id:"C番号", content, by:"user"|"claude", reason?, depends_on?} … 決まったこと。by=user はユーザーが言った・認めたことだけ。あなたが補ったもの（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）は by=claude と reason
+- add {id:"C番号", content, by:"user"|"claude", reason?, depends_on?, rel?} … 決まったこと。作業への答えなら answer で作業につなぐ。別の決まったことへの補足・理由・対比・結果・条件なら depends_on:[その id] と rel:"elaboration"|"explanation"|"contrast"|"result"|"condition"。by=user はユーザーが言った・認めたことだけ。あなたが補ったもの（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）は by=claude と reason
 - confirm {id} … ユーザーがあなたの補完を認めた
 - retract {id, replaced_by?} / amend {id, content} / recheck {id}
-- open {id:"Q番号", question, parent?, owner:"user"|"claude"} / answer {question, by?, complete}
+- open {id:"Q番号", question, parent?, owner:"user"|"claude", intent?:{quote, reading}} … 作業（問い）を開く。作業は木：大きな作業を分けた下位の作業は parent に親の作業。新しい作業を始めるときは intent も置く
+- answer {question, by?, complete}
 規則：意図の読みと by=user の決まったことは、ユーザーの発言を根拠にしか変えない。答えの出た問いは complete で閉じる。id は結果に出る「次の ID」から振る。
 結果として、検証の結果と、更新後のボードの状態（id つき）が返る。`
 
@@ -277,24 +278,27 @@ export const register: Register = on => {
     }
     const flipped = new Set(await read($, expanded))
     const flip = (key: string) => void update($, expanded, list => (list.includes(key) ? list.filter(k => k !== key) : [...list, key]))
-    const color = (tone?: string) => (tone === 'supplemented' ? SUPPLEMENTED : tone === 'flagged' ? FLAGGED : tone === 'new' ? 'cyan' : undefined)
-    const item = (it: Item, indent: number) => (
-      <Box key={it.key} flexDirection="column" paddingLeft={indent}>
-        <Box>
-          {it.tone === 'quote' || it.tone === 'strong' ? null : (
-            <Text color={color(it.tone)} dimColor={it.tone === 'dim'}>{it.tone === 'new' ? '新 ' : '・'}</Text>
-          )}
+    const color = (tone?: string) =>
+      tone === 'supplemented' ? SUPPLEMENTED : tone === 'flagged' ? FLAGGED : tone === 'new' ? 'cyan' : tone === 'dim' || tone === 'quote' ? undefined : 'white'
+    const dim = (tone?: string) => tone === 'dim' || tone === 'quote'
+    // 1行：作業の見出しは押して開閉。ほかは字下げ（木の深さ）＋本文＋注釈
+    const item = (it: Item) => {
+      const pad = 1 + (it.indent ?? 0) * 2
+      if (it.toggle)
+        return <Box key={it.key} paddingLeft={pad}><Button key={it.key} plain label={`${it.toggle.open ? '▾' : '▸'} ${it.text}`} onPress={() => flip(it.key)} /></Box>
+      return (
+        <Box key={it.key} flexDirection="column" paddingLeft={pad}>
           <Box flexShrink={1}>
-            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone) ?? (it.tone === 'dim' || it.tone === 'quote' ? undefined : 'white')} dimColor={it.tone === 'dim' || it.tone === 'quote'}>{it.text}</Text>
+            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone)} dimColor={dim(it.tone)}>{it.text}</Text>
           </Box>
+          {(it.sub ?? []).map((line, i) => (
+            <Box key={`${it.key}:${i}`} paddingLeft={2}>
+              <Text wrap="wrap" dimColor>{line}</Text>
+            </Box>
+          ))}
         </Box>
-        {(it.sub ?? []).map((line, i) => (
-          <Box key={`${it.key}:${i}`} paddingLeft={2}>
-            <Text wrap="wrap" color={line.startsWith('文脈の補完') ? SUPPLEMENTED : undefined} dimColor={!line.startsWith('文脈の補完')}>{line}</Text>
-          </Box>
-        ))}
-      </Box>
-    )
+      )
+    }
     return (
       <Box flexDirection="column">
         <Box justifyContent="flex-end">{close}</Box>
@@ -303,13 +307,7 @@ export const register: Register = on => {
             {sec.collapsible
               ? <Button key={`h:${sec.key}`} plain label={`${sec.collapsible.open ? '▾' : '▸'} ${sec.title}`} onPress={() => flip(sec.key)} />
               : <Text bold color={sec.tone === 'supplemented' ? SUPPLEMENTED : sec.tone === 'flagged' ? FLAGGED : 'white'}>{sec.title}</Text>}
-            {sec.items.map(it => item(it, 1))}
-            {(sec.groups ?? []).map(g => (
-              <Box key={g.key} flexDirection="column" paddingLeft={1} marginTop={1}>
-                <Text dimColor={g.closed} wrap="wrap">{g.closed ? '✓ ' : ''}{g.title}</Text>
-                {g.items.map(it => item(it, 1))}
-              </Box>
-            ))}
+            {sec.items.map(item)}
           </Box>
         ))}
       </Box>

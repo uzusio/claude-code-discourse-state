@@ -55,9 +55,10 @@ for (const sec of sections(b, new Set(), audit) as Section[]) {
   const headTone: Tone = sec.tone === 'supplemented' ? 'yellow' : sec.tone === 'flagged' ? 'red' : 'white'
   push(pane, 0, sec.collapsible ? `${sec.collapsible.open ? '▾' : '▸'} ${sec.title}` : sec.title, headTone, true)
   for (const it of sec.items) {
-    const lead = it.tone === 'quote' || it.tone === 'strong' ? '' : it.tone === 'new' ? '新 ' : '・'
-    push(pane, 1, lead + it.text, toneOf(it), it.tone === 'strong', lead ? 1 : 0)
-    for (const s of it.sub ?? []) push(pane, 2, s, s.startsWith('文脈の補完') ? 'yellow' : 'gray')
+    const d = 1 + (it.indent ?? 0)
+    if (it.toggle) { push(pane, d, `${it.toggle.open ? '▾' : '▸'} ${it.text}`, 'white', true, 1); continue }
+    push(pane, d, it.text, toneOf(it), it.tone === 'strong', 1)
+    for (const s of it.sub ?? []) push(pane, d + 1, s, 'gray')
   }
   pane.push({ indent: 0, text: '', tone: 'white' })
 }

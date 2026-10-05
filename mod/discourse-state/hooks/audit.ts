@@ -82,8 +82,8 @@ export const DEVIATION_SYSTEM = `あなたは監査係。AI アシスタント�
 export const buildDeviationPrompt = (s: State, x: Exchange) => {
   const decided = s.commitments.filter(c => c.by === 'user').slice(-20)
   return [
-    '## ボード：意図の読み',
-    s.goal ? s.goal.reading : '（未設定）',
+    '## ボード：いま扱っている作業とその意図の読み',
+    ...focusLines(s),
     '',
     '## ボード：決まったこと（ユーザーが言った・認めたもの、新しい順に最大20件）',
     ...[...decided].reverse().map(c => `- ${c.content}`),
@@ -114,6 +114,20 @@ export const parseDeviation = (text: string): Flag[] | null => {
   return v.flags
     .filter((f: any) => f && typeof f.text === 'string' && f.text.trim())
     .map((f: any) => ({ kind: kinds.includes(f.kind) ? (f.kind as Flag['kind']) : 'deviation', text: f.text }))
+}
+
+// いま扱っている作業：いちばん新しい開いた問いから、意図を持つ作業まで親をたどる
+const focusLines = (s: State): string[] => {
+  const open = s.questions.filter(q => !q.closed)
+  let q = open.length ? open[open.length - 1] : undefined
+  const chain: string[] = []
+  while (q) {
+    chain.push(`- ${q.question}${q.intent ? ` ／ 意図の読み：${q.intent.reading}` : ''}`)
+    if (q.intent) break
+    q = q.parent ? s.questions.find(x => x.id === q!.parent) : undefined
+  }
+  if (!chain.length && s.goal) chain.push(`- （会話全体の目的）${s.goal.reading}`)
+  return chain.length ? chain : ['（なし）']
 }
 
 // 返答から JSON を取り出す。コードフェンスや前置きが付いていても拾う

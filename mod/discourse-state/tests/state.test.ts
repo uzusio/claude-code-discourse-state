@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { sections } from '../hooks/board'
+import { bandLine, sections } from '../hooks/board'
 import { apply, board, emptyState, renderCompact, renderIds, replay, validate } from '../hooks/state'
 import type { Diff } from '../hooks/state'
 import { AUDIT_BOARD, AUDIT_DIFFS, SELF_BOARD, SELF_DIFFS } from './fixtures'
@@ -56,42 +56,38 @@ test('足した関係：対比は取り消さない、理由づけには対象�
   expect(v({ relation: 'Clarification', ops: [{ op: 'none' }] }).some(x => x.includes('Clarification なのに open'))).toBe(true)
 })
 
-test('ペイン：意図の読み → 流れ → あなたが決めること を先に出し、履歴（補った前提を含む）はたたむ', async () => {
-  let s = replay(diffs, 'audit')
-  s = apply(s, {
-    turn: 4, utterance_id: 'σ4', relation: 'Continuation',
-    ops: [{ op: 'add', id: 'C6', content: '通知は 4時50分に送る', by: 'claude', reason: '時刻は言われていない' },
-          { op: 'open', id: 'Q2', question: '通知先はどこか' }],
-  })
-  const secs = (flipped: string[]) => sections(board(s), new Set(flipped))
-  const byKey = (flipped: string[]) => new Map(secs(flipped).map(x => [x.key, x]))
-  expect(secs([]).map(x => x.key)).toEqual(['reading', 'flow', 'mine', 'decided', 'supplemented', 'replaced'])
+test('ペイン：作業の木に意図と、関係ラベル付きの決まったことがぶら下がる。片付いた作業と置き換えはたたむ', async () => {
+  const b = board(replay(SELF_DIFFS as unknown as Diff[], 'self'))
+  const secs = (flipped: string[], audit = [] as { kind: 'deviation'; text: string }[]) => sections(b, new Set(flipped), audit)
+  expect(secs([]).map(x => x.key)).toEqual(['tasks', 'flow', 'replaced'])
+  expect(secs([], [{ kind: 'deviation', text: 'x' }]).map(x => x.key)).toEqual(['audit', 'tasks', 'flow', 'replaced'])
 
-  const reading = byKey([]).get('reading')!.items
-  expect(reading.filter(i => i.tone === 'quote').length).toBe(2)
-  expect(reading.find(i => i.tone === 'strong')!.text).toContain('代わりに拾って')
-  expect(reading.find(i => i.key === 'focus')!.text).toBe('いま扱っている問い：通知先はどこか')
-
-  // 流れ：なぜ・どの意図から・言われていない前提（黄色）
-  const step2 = byKey([]).get('flow')!.items[1]!
-  expect(step2.text).toBe('2. 結果を見る前に Claude が全カードを読む')
-  expect(step2.sub).toEqual([
-    'ルールで拾えない違和感を、ユーザーの代わりに見る（目的の中心）',
-    '← 目的・「最後にトップのエージェントが全カードを読む」',
-    '文脈の補完：規準監査の結果を見る前に読む（結果に判断を引っぱられないため）',
-    '文脈の補完：読むのは Claude 本人（「トップのエージェント」から。別エージェントの可能性は検討していない）',
-  ])
-
-  expect(byKey([]).get('mine')!.items.map(i => i.text)).toEqual(['通知先はどこか'])  // 子の問いを持つ『監査ジョブをどう組むか』は話題なので出さない
-  // 履歴は既定でたたむ。補った前提は見出しに新しい件数を出す
-  expect(byKey([]).get('supplemented')!.title).toBe('文脈の補完（3・うち新しく 1）')
-  expect(byKey([]).get('supplemented')!.items).toEqual([])
-  expect(byKey(['supplemented']).get('supplemented')!.items[0]!.text).toBe('新 通知は 4時50分に送る')
-  expect(byKey(['decided']).get('decided')!.groups!.map(g => g.title)).toEqual(['監査ジョブをどう組むか'])
-  expect(byKey(['replaced']).get('replaced')!.items[0]!.sub).toEqual(['→ 実行は 10/5 5時ごろ（日付が変わっていたのを見落としていた）'])
+  const rows = secs([]).find(x => x.key === 'tasks')!.items
+  const row = (key: string) => rows.find(r => r.key === key)!
+  // 作業の見出し（押して開閉）と、その意図
+  expect(row('t:Q0')).toMatchObject({ indent: 0, tone: 'task', toggle: { open: true }, text: 'Claude の意図の読みをどう見せるか（決める人：あなた）' })
+  expect(row('t:Q0:reading')).toMatchObject({ indent: 1, tone: 'strong', text: '意図：会話を止めずに、Claude の読みとそのずれが見えるようにする' })
+  expect(row('t:Q0:quote:0').tone).toBe('quote')
+  // 決まったことは関係ラベル付きで、親の下に1段下げてぶら下がる
+  expect(row('c:C5')).toMatchObject({ indent: 1, tone: 'new', text: '新 答え：読みは非同期に見られればよい（作業の前後は問わない）', sub: ['「作業を始める前に読みを確認してもらう」を置き換え'] })
+  expect(row('c:C6')).toMatchObject({ indent: 2, text: '新 理由：やりとりは非同期に進めたい' })
+  // 下位の作業と、その中の補完（黄色）
+  expect(row('t:Q1').indent).toBe(1)
+  expect(row('c:C2')).toMatchObject({ indent: 2, tone: 'supplemented', text: '答え（補完）：プロンプトの上に帯を常に出す', sub: ['補った理由：どこに出すかは言われていない。常に目に入る場所を選んだ'] })
+  expect(row('c:C3')).toMatchObject({ indent: 3, tone: 'supplemented', text: '補足（補完）：帯は2行まで' })
+  // 作業を押すとたたむ
+  expect(secs(['t:Q0']).find(x => x.key === 'tasks')!.items.map(r => r.key)).toEqual(['t:Q0'])
+  // 置き換えは既定でたたむ
+  expect(secs([]).find(x => x.key === 'replaced')!.items).toEqual([])
   // id は表に出さない
-  const shown = JSON.stringify(secs(['decided', 'supplemented', 'replaced']).map(x => [x.title, x.items.map(i => [i.text, i.sub])]))
+  const shown = JSON.stringify(secs(['replaced']).map(x => [x.title, x.items.map(i => [i.text, i.sub])]))
   expect(shown).not.toMatch(/\b[CQ]\d+\b/)
+})
+
+test('帯：いま扱っている作業（意図を持つ作業まで親をたどる）の意図を出す', async () => {
+  const b = board(replay(SELF_DIFFS as unknown as Diff[], 'self'))
+  // いちばん新しい開いた問いは「帯を常に出してうるさくないか」（意図なし）→ 親の「帯に何を出すか」の意図
+  expect(bandLine(b, 200).goal).toBe('会話の邪魔をせずに、いまの読みが目に入るようにする')
 })
 
 test('board_update の結果は短い要約（最近の決定・次の ID）と、弾かれた id だけ', async () => {

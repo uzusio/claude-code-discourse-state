@@ -237,9 +237,8 @@ export const replay = (diffs: Diff[], session: string): State => {
 // 次の差分を書くのに要るもの（読み・開いている問い・最近の決定・手順・次の ID）だけにする
 export const renderCompact = (s: State, recent = 8): string => {
   const lines: string[] = []
-  lines.push(`読み: ${s.goal?.reading ?? '未設定'}`)
   const open = s.questions.filter(q => !q.closed)
-  lines.push(`開いている問い: ${open.length ? open.map(q => `${q.id} ${q.question}`).join(' ／ ') : 'なし'}`)
+  lines.push(`開いている作業: ${open.length ? open.map(q => `${q.id} ${q.question}${q.intent ? `〔意図：${q.intent.reading}〕` : '〔意図なし〕'}`).join(' ／ ') : 'なし'}`)
   const tail = s.commitments.slice(-recent)
   lines.push(`最近の決定（全 ${s.commitments.length} 件中 ${tail.length} 件）:`)
   for (const c of tail) lines.push(`- ${c.id}${c.by === 'claude' ? '（補完）' : ''} ${c.content}`)
