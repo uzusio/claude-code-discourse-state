@@ -76,29 +76,31 @@ export const parseAttribution = (text: string, items: { id: string; content: str
 export const DEVIATION_SYSTEM = `あなたは監査係。AI アシスタントが自分で書いた「理解のボード」（ユーザーの意図の読み・決まったこと・これからの流れ・問い）と、そのターンのユーザーの発言、AI の返信と作業を受け取る。
 目的は1つ：AI がユーザーの意図そのものを読み違えている兆しを見つけること。AI がユーザーの代わりに判断できるようにするための監査なので、AI の判断に任されている進め方は見ない。
 挙げるのは次の場合だけ：
-1. deviation：AI の作業が、ボードの意図の読みや、ユーザーが決めたことと反対の方向に進んでいる
+1. deviation：AI の作業が、ボードの意図の読みと反対の方向に進んでいる
 2. relevance：AI の返信が、ユーザーがこのターンに求めたことと別のことに答えている
-3. unclosed：ユーザーが答えた・決めた問いが開いたまま（ユーザーの手番が残っているように見える）
+3. unclosed：片付いた作業がボードで開いたまま（ユーザーの手番が残っているように見える）
 挙げないもの：手順の順番、断りなく進めたこと、言葉の出どころ、言い回し、ボードの書き方の細部、AI の判断で決めてよいこと。
 確信が持てるものだけ、多くても2件。無ければ空にする。
 各指摘は、ユーザーが読んで分かるように「意図の読みが〜かもしれない」の形で、何と何がずれているかを具体的に1〜2文で書く。
 出力は JSON だけ: {"flags": [{"kind": "deviation" | "relevance" | "unclosed", "text": "..."}]}`
 
 export const buildDeviationPrompt = (s: State, x: Exchange) => {
-  const decided = s.commitments.filter(c => c.by === 'user').slice(-20)
+  // ボードは作業ごとに 意図・文脈の補完・流れ の3つ。開いている作業ぶんを渡す
+  const open = s.questions.filter(q => !q.closed)
+  const supOf = (qid: string) => s.commitments.filter(c => c.by === 'claude' && q2(qid).answers.includes(c.id))
+  const q2 = (qid: string) => s.questions.find(q => q.id === qid)!
   return [
     '## ボード：いま扱っている作業とその意図の読み',
     ...focusLines(s),
     '',
-    '## ボード：決まったこと（ユーザーが言った・認めたもの、新しい順に最大20件）',
-    ...[...decided].reverse().map(c => `- ${c.content}`),
-    '',
-    '## ボード：これからの流れ',
-    ...(s.steps.length ? s.steps.map((st, i) => `${i + 1}. ${st.text}`) : ['（なし）']),
-    '',
-    '## ボード：開いている問い',
-    ...(s.questions.filter(q => !q.closed).map(q => `- ${q.question}`)),
-    '## ボード：最近閉じた問い',
+    '## ボード：開いている作業（意図・文脈の補完・流れ）',
+    ...open.flatMap(q => [
+      `- ${q.question}${q.intent ? ` ／ 意図の読み：${q.intent.reading}` : ''}`,
+      ...supOf(q.id).map(c => `  - 補完：${c.content}`),
+      ...(q.steps ?? []).map((st, i) => `  - 流れ${i + 1}：${st.text}`),
+    ]),
+    ...(open.length ? [] : ['（なし）']),
+    '## ボード：最近片付いた作業',
     ...(s.questions.filter(q => q.closed).slice(-5).map(q => `- ${q.question}`)),
     '',
     '## このターンのユーザーの発言',

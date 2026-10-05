@@ -209,15 +209,15 @@ class Move(unittest.TestCase):
     def test_move_reattaches_to_another_task(self):
         """進め方の決めごとを、意図の作業から片付いた進め方の作業へ付け替える。"""
         s = replay(read_diffs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "self.jsonl")), "s")
-        d = {"turn": 4, "utterance_id": "t", "relation": "Continuation",
-             "ops": [{"op": "open", "id": "Q3", "question": "進め方", "owner": "claude"},
-                     {"op": "move", "id": "C1", "question": "Q3"},
-                     {"op": "answer", "question": "Q3", "complete": True}]}
+        d = {"turn": 3, "utterance_id": "t", "relation": "Continuation",
+             "ops": [{"op": "open", "id": "Q2", "question": "進め方", "owner": "user"},
+                     {"op": "move", "id": "C0", "question": "Q2"},
+                     {"op": "answer", "question": "Q2", "complete": True}]}
         self.assertEqual(validate(s, d), [])
         tasks = {t["id"]: t for t in board(apply(s, d))["tasks"]}
-        self.assertNotIn("C1", [i["id"] for i in tasks["Q0"]["items"]])
-        self.assertEqual([i["id"] for i in tasks["Q3"]["items"]], ["C1"])
-        self.assertTrue(tasks["Q3"]["closed"])
+        self.assertNotIn("C0", [i["id"] for i in tasks["Q0"]["items"]])
+        self.assertEqual([i["id"] for i in tasks["Q2"]["items"]], ["C0"])
+        self.assertTrue(tasks["Q2"]["closed"])
 
     def test_move_rejects_unknown(self):
         s = replay(read_diffs(os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples", "self.jsonl")), "s")

@@ -95,7 +95,8 @@ async function runAudit($: EngineInterface) {
   usage.deviation = used(r)
   if (r.isAnswered) flags.push(...(parseDeviation(r.text) ?? []))
 
-  const audit: Audit = { turn: n, flags }
+  // 何を渡したかも残す（作業中に届いた発言が入っているかを後から確かめられるように）
+  const audit: Audit & { user?: string } = { turn: n, flags, user: x.user.slice(0, 400) }
   await $.fs.write(`${d}/audit.json`, JSON.stringify(audit, null, 2))
   await $.fs.write(`${d}/audit.jsonl`, `${(await readText($, `${d}/audit.jsonl`)) ?? ''}${JSON.stringify(audit)}\n`)
   await $.fs.write(`${d}/usage.jsonl`, `${(await readText($, `${d}/usage.jsonl`)) ?? ''}${JSON.stringify(usage)}\n`)
@@ -111,22 +112,27 @@ const TOOL = 'board_update'
 const TOOL_FULL = 'mcp__discourse-state__board_update'
 
 const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている、あなたの「いまの理解」）を更新する。
-ユーザーの発言を受けて意図の読み・決まったこと・流れが変わったターンでは、返信の終わりに必ず1回呼ぶ。変化が無ければ呼ばなくてよい。
+作業の意図の読み・文脈の補完・流れが変わったターンでは、返信の終わりに1回呼ぶ。変化が無ければ呼ばなくてよい。
 ボードはあなたの頭の中をそのまま見せるもの。あなた自身の理解を書く。
 
+ボードに書くのは、作業ごとに3つだけ：
+- 意図：ユーザーの言葉と、あなたの読み。ユーザーの訂正は読みを書き換えて表す（前の読みは履歴に残る）。読み手・調子・範囲など、自分が無意識に置いている前提も読みに含める
+- 文脈の補完：その読みのために、ユーザーが言っていないのにあなたが補った前提（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）。理由つき
+- 流れ：その作業のこれからの手順と、手順ごとの「なぜ」
+ユーザーが言った決定の一覧は書かない。作業は木：大きな作業を分けた下位の作業は parent で親に付ける。片付いた作業は閉じる。
+
 渡すのは差分1つ：{"relation": 関係, "ops": [操作, ...]}
-関係：Correction（前の決定を取り消す・置き換える）／Contrast（「でも」で並べるだけ。取り消さない）／Elaboration（詳しくする）／Explanation（「〜だから」。理由づけ。target か depends_on で対象を示す）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（問いを開く）／Clarification（言葉の意味・範囲を確かめる問い）／Acknowledge（受け取るだけ）
+関係：Correction（読みや前提を訂正された）／Contrast（「でも」で並べるだけ）／Elaboration（詳しくなった）／Explanation（理由づけ。target か depends_on で対象を示す）／Continuation（足す）／Result／Condition／Answer（問いに答える）／Open（新しい作業）／Clarification（言葉の意味・範囲を確かめる問い）／Acknowledge（受け取るだけ）
 操作：
-- intent {question:"Q番号", quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"} … その作業（問い）の意図の読みができた・変わったとき。意図は会話全体ではなく作業ごとに持つ。読み手・調子・範囲など、自分が無意識に置いている前提も読みに含める
-- plan {steps:[{text, from:["goal" か C の id], why:"なぜこの手順か（30字以内）"}]} … これからの流れ。全体を置き換える。終わった手順は外す
-- add {id:"C番号", content, by:"user"|"claude", reason?, depends_on?, rel?} … 決まったこと。作業への答えなら answer で作業につなぐ。別の決まったことへの補足・理由・対比・結果・条件なら depends_on:[その id] と rel:"elaboration"|"explanation"|"contrast"|"result"|"condition"。by=user はユーザーが言った・認めたことだけ。あなたが補ったもの（範囲・順番・理由・言葉の意味の推測、自分で決めたやり方）は by=claude と reason
+- open {id:"Q番号", question:"作業の名前", parent?, owner:"user", intent:{quote:[ユーザーの言葉そのまま], reading:"あなたの読み（40字以内）"}} … 作業を始める
+- intent {question:"Q番号", quote:[...], reading:"..."} … その作業の意図の読みが変わったとき（訂正・深まった）
+- add {id:"C番号", content, by:"claude", reason, depends_on?, rel?} と answer {question:"Q番号", by:"C番号"} … 文脈の補完をその作業に付ける。別の補完への補足・理由・対比・結果・条件なら depends_on と rel（"elaboration"|"explanation"|"contrast"|"result"|"condition"）
 - confirm {id} … ユーザーがあなたの補完を認めた
-- retract {id, replaced_by?} / amend {id, content} / recheck {id}
-- open {id:"Q番号", question, parent?, owner:"user"|"claude", intent?:{quote, reading}} … 作業（問い）を開く。作業は木：大きな作業を分けた下位の作業は parent に親の作業。新しい作業を始めるときは intent も置く
-- answer {question, by?, complete} … answer で作業に付けるのは、その作業の問いに直接答える決まったことだけ（作業の直下は「答え」と表示される）。進め方・環境・道具の決めごとは、進め方の作業（片付けてよい）に付ける
-- move {id, question} … 決まったことを別の作業へ付け替える
-規則：意図の読みと by=user の決まったことは、ユーザーの発言を根拠にしか変えない。答えの出た問いは complete で閉じる。id は結果に出る「次の ID」から振る。
-結果として、検証の結果と、更新後のボードの状態（id つき）が返る。`
+- retract {id, replaced_by?} … 補完を取り下げた
+- plan {question:"Q番号", steps:[{text, why:"なぜこの手順か（30字以内）"}]} … その作業の流れ。作業ごとに全体を置き換える。終わった手順は外す
+- answer {question:"Q番号", complete:true} … 作業が片付いた（ボードから消える）
+- move {id, question} … 補完を別の作業へ付け替える
+id は結果に出る「次の ID」から振る。結果として、検証の結果と、開いている作業と意図、最近の項目、次の ID が返る。`
 
 let updatedThisTurn = false
 let workedThisTurn = false
@@ -308,7 +314,7 @@ export const register: Register = on => {
       return (
         <Box key={it.key} flexDirection="column" paddingLeft={pad}>
           <Box flexShrink={1}>
-            <Text wrap="wrap" bold={it.tone === 'strong'} color={color(it.tone)} dimColor={dim(it.tone)}>{it.text}</Text>
+            <Text wrap="wrap" bold={it.tone === 'strong' || it.tone === 'label'} color={color(it.tone)} dimColor={dim(it.tone)}>{it.text}</Text>
           </Box>
           {(it.sub ?? []).map((line, i) => (
             <Box key={`${it.key}:${i}`} paddingLeft={2}>

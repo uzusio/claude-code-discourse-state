@@ -24,6 +24,8 @@ export type TaskItem = {
 export type Task = {
   id: string; question: string; owner: 'user' | 'claude'; closed: boolean; parent: string | null
   intent: { quote: string[]; reading: string; source: string | null } | null
+  intent_history: { quote: string[]; reading: string; source: string | null }[]
+  steps: Step[]
   items: TaskItem[]
 }
 // changed：直前のターンの終わりで、ボードの中身が変わったか

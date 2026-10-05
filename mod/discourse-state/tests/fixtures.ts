@@ -283,6 +283,8 @@ export const AUDIT_BOARD = {
       "closed": false,
       "parent": null,
       "intent": null,
+      "intent_history": [],
+      "steps": [],
       "items": [
         {
           "id": "C0",
@@ -318,6 +320,8 @@ export const AUDIT_BOARD = {
       "closed": false,
       "parent": "Q0",
       "intent": null,
+      "intent_history": [],
+      "steps": [],
       "items": []
     }
   ]
@@ -327,7 +331,7 @@ export const SELF_DIFFS = [
   {
     "turn": 1,
     "utterance_id": "π1",
-    "text": "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい",
+    "text": "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい。細かい手順は任せる",
     "relation": "Open",
     "target": null,
     "markers": [],
@@ -338,57 +342,40 @@ export const SELF_DIFFS = [
         "question": "Claude の意図の読みをどう見せるか",
         "intent": {
           "quote": [
-            "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい"
+            "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい",
+            "細かい手順は任せる"
           ],
-          "reading": "会話を止めずに、Claude の読みとそのずれが見えるようにする"
+          "reading": "作業を始める前に、Claude の読みを確かめられるようにする"
         }
-      },
-      {
-        "op": "add",
-        "id": "C0",
-        "content": "読みは会話を止めずに見られるようにする"
-      },
-      {
-        "op": "answer",
-        "question": "Q0",
-        "by": "C0"
       }
     ]
   },
   {
-    "turn": 2,
-    "utterance_id": "π2",
-    "text": "細かい手順は任せる。意図が合っていればいい",
-    "relation": "Elaboration",
-    "target": "Q0",
-    "markers": [],
-    "ops": [
-      {
-        "op": "add",
-        "id": "C1",
-        "content": "細かい手順は任せる。意図が合っていればいい"
-      },
-      {
-        "op": "answer",
-        "question": "Q0",
-        "by": "C1"
-      }
-    ]
-  },
-  {
-    "turn": 2,
-    "utterance_id": "σ2",
+    "turn": 1,
+    "utterance_id": "σ1",
     "text": "（Claude の作業）",
     "relation": "Continuation",
     "target": "Q0",
     "markers": [],
     "ops": [
       {
+        "op": "add",
+        "id": "C0",
+        "content": "読みはボタンで開くボードに、要点は帯に出す",
+        "by": "claude",
+        "reason": "どこに出すかは言われていない。会話を邪魔しない場所を選んだ"
+      },
+      {
+        "op": "answer",
+        "question": "Q0",
+        "by": "C0"
+      },
+      {
         "op": "open",
         "id": "Q1",
         "question": "帯に何を出すか",
         "parent": "Q0",
-        "owner": "claude",
+        "owner": "user",
         "intent": {
           "quote": [],
           "reading": "会話の邪魔をせずに、いまの読みが目に入るようにする"
@@ -396,202 +383,115 @@ export const SELF_DIFFS = [
       },
       {
         "op": "add",
-        "id": "C2",
+        "id": "C1",
         "content": "プロンプトの上に帯を常に出す",
         "by": "claude",
-        "reason": "どこに出すかは言われていない。常に目に入る場所を選んだ"
+        "reason": "常に目に入る場所として選んだ"
       },
       {
         "op": "answer",
         "question": "Q1",
-        "by": "C2"
+        "by": "C1"
       },
       {
         "op": "add",
-        "id": "C3",
+        "id": "C2",
         "content": "帯は2行まで",
         "by": "claude",
         "reason": "長いと会話が隠れる",
         "depends_on": [
-          "C2"
+          "C1"
         ],
-        "rel": "elaboration"
-      },
-      {
-        "op": "add",
-        "id": "C4",
-        "content": "作業を始める前に読みを確認してもらう",
-        "by": "claude",
-        "reason": "ずれを止めるには作業の前がよいと考えた"
-      },
-      {
-        "op": "answer",
-        "question": "Q0",
-        "by": "C4"
-      },
-      {
-        "op": "open",
-        "id": "Q2",
-        "question": "帯を常に出してうるさくないか",
-        "parent": "Q1",
-        "owner": "user"
+        "rel": "condition"
       },
       {
         "op": "plan",
+        "question": "Q0",
         "steps": [
           {
             "text": "帯に意図の読みと次の一歩を出す",
-            "from": [
-              "C0",
-              "C2"
-            ],
-            "why": "会話を止めずに、読みのずれに気づける"
+            "why": "会話を止めずに読みのずれに気づける"
           },
           {
-            "text": "ボードに作業ごとの意図と決まったことを木で並べる",
-            "from": [
-              "C0"
-            ],
+            "text": "ボードに作業ごとの意図・補完・流れを並べる",
             "why": "読みがどこから来たかを確かめられる"
           },
           {
             "text": "話しかけて読みを直せるようにする",
-            "from": [
-              "C1"
-            ],
             "why": "ずれを見つけたらその場で直せる"
+          }
+        ]
+      },
+      {
+        "op": "plan",
+        "question": "Q1",
+        "steps": [
+          {
+            "text": "1行目に意図の読み、2行目に次の一歩",
+            "why": "2行で読みと行き先が分かる"
           }
         ]
       }
     ]
   },
   {
-    "turn": 3,
-    "utterance_id": "π3",
+    "turn": 2,
+    "utterance_id": "π2",
     "text": "作業の前か後かは関係ない。やりとりは非同期に進めたいから",
     "relation": "Correction",
-    "target": "C4",
+    "target": "Q0",
     "markers": [
       "関係ない"
     ],
     "ops": [
       {
-        "op": "retract",
-        "id": "C4",
-        "replaced_by": "C5"
-      },
-      {
-        "op": "add",
-        "id": "C5",
-        "content": "読みは非同期に見られればよい（作業の前後は問わない）"
-      },
-      {
-        "op": "answer",
+        "op": "intent",
         "question": "Q0",
-        "by": "C5"
-      },
-      {
-        "op": "add",
-        "id": "C6",
-        "content": "やりとりは非同期に進めたい",
-        "depends_on": [
-          "C5"
+        "quote": [
+          "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい",
+          "細かい手順は任せる",
+          "作業の前か後かは関係ない。やりとりは非同期に進めたい"
         ],
-        "rel": "explanation"
+        "reading": "非同期のやりとりの中で、Claude の読みとずれをいつでも見られるようにする"
       }
     ]
   }
 ] as const
 
 export const SELF_BOARD = {
-  "turn": 3,
+  "turn": 2,
   "goal": null,
-  "decided": [
+  "decided": [],
+  "replaced": [],
+  "supplemented": [
     {
       "id": "C0",
-      "content": "読みは会話を止めずに見られるようにする",
-      "source": "π1",
-      "turn": 1
+      "content": "読みはボタンで開くボードに、要点は帯に出す",
+      "source": "σ1",
+      "turn": 1,
+      "reason": "どこに出すかは言われていない。会話を邪魔しない場所を選んだ"
     },
     {
       "id": "C1",
-      "content": "細かい手順は任せる。意図が合っていればいい",
-      "source": "π2",
-      "turn": 2
+      "content": "プロンプトの上に帯を常に出す",
+      "source": "σ1",
+      "turn": 1,
+      "reason": "常に目に入る場所として選んだ"
     },
-    {
-      "id": "C5",
-      "content": "読みは非同期に見られればよい（作業の前後は問わない）",
-      "source": "π3",
-      "turn": 3
-    },
-    {
-      "id": "C6",
-      "content": "やりとりは非同期に進めたい",
-      "source": "π3",
-      "turn": 3
-    }
-  ],
-  "replaced": [
-    {
-      "id": "C4",
-      "content": "作業を始める前に読みを確認してもらう",
-      "turn": 3,
-      "source": "π3",
-      "replaced_by": "C5"
-    }
-  ],
-  "supplemented": [
     {
       "id": "C2",
-      "content": "プロンプトの上に帯を常に出す",
-      "source": "σ2",
-      "turn": 2,
-      "reason": "どこに出すかは言われていない。常に目に入る場所を選んだ"
-    },
-    {
-      "id": "C3",
       "content": "帯は2行まで",
-      "source": "σ2",
-      "turn": 2,
+      "source": "σ1",
+      "turn": 1,
       "reason": "長いと会話が隠れる"
     }
   ],
-  "steps": [
-    {
-      "text": "帯に意図の読みと次の一歩を出す",
-      "from": [
-        "C0",
-        "C2"
-      ],
-      "why": "会話を止めずに、読みのずれに気づける"
-    },
-    {
-      "text": "ボードに作業ごとの意図と決まったことを木で並べる",
-      "from": [
-        "C0"
-      ],
-      "why": "読みがどこから来たかを確かめられる"
-    },
-    {
-      "text": "話しかけて読みを直せるようにする",
-      "from": [
-        "C1"
-      ],
-      "why": "ずれを見つけたらその場で直せる"
-    }
-  ],
+  "steps": [],
   "open": [
-    {
-      "id": "Q2",
-      "question": "帯を常に出してうるさくないか",
-      "owner": "user",
-      "parent": "Q1"
-    },
     {
       "id": "Q1",
       "question": "帯に何を出すか",
-      "owner": "claude",
+      "owner": "user",
       "parent": "Q0"
     },
     {
@@ -610,30 +510,19 @@ export const SELF_BOARD = {
         "closed": false,
         "parent": null,
         "items": [
-          "C0",
-          "C1",
-          "C5",
-          "C6"
+          "C0"
         ]
       },
       {
         "id": "Q1",
         "question": "帯に何を出すか",
-        "owner": "claude",
+        "owner": "user",
         "closed": false,
         "parent": "Q0",
         "items": [
-          "C2",
-          "C3"
+          "C1",
+          "C2"
         ]
-      },
-      {
-        "id": "Q2",
-        "question": "帯を常に出してうるさくないか",
-        "owner": "user",
-        "closed": false,
-        "parent": "Q1",
-        "items": []
       }
     ],
     "loose": []
@@ -647,87 +536,91 @@ export const SELF_BOARD = {
       "parent": null,
       "intent": {
         "quote": [
-          "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい"
+          "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい",
+          "細かい手順は任せる",
+          "作業の前か後かは関係ない。やりとりは非同期に進めたい"
         ],
-        "reading": "会話を止めずに、Claude の読みとそのずれが見えるようにする",
-        "source": "π1"
+        "reading": "非同期のやりとりの中で、Claude の読みとずれをいつでも見られるようにする",
+        "source": "π2"
       },
+      "intent_history": [
+        {
+          "quote": [
+            "Claude が自分の意図をどう汲み取っているのか、会話しながら見たい",
+            "細かい手順は任せる"
+          ],
+          "reading": "作業を始める前に、Claude の読みを確かめられるようにする",
+          "source": "π1"
+        }
+      ],
+      "steps": [
+        {
+          "text": "帯に意図の読みと次の一歩を出す",
+          "from": [],
+          "why": "会話を止めずに読みのずれに気づける"
+        },
+        {
+          "text": "ボードに作業ごとの意図・補完・流れを並べる",
+          "from": [],
+          "why": "読みがどこから来たかを確かめられる"
+        },
+        {
+          "text": "話しかけて読みを直せるようにする",
+          "from": [],
+          "why": "ずれを見つけたらその場で直せる"
+        }
+      ],
       "items": [
         {
           "id": "C0",
-          "content": "読みは会話を止めずに見られるようにする",
-          "by": "user",
+          "content": "読みはボタンで開くボードに、要点は帯に出す",
+          "by": "claude",
           "turn": 1,
           "parent": null,
-          "rel": "answer"
-        },
-        {
-          "id": "C1",
-          "content": "細かい手順は任せる。意図が合っていればいい",
-          "by": "user",
-          "turn": 2,
-          "parent": null,
-          "rel": "answer"
-        },
-        {
-          "id": "C5",
-          "content": "読みは非同期に見られればよい（作業の前後は問わない）",
-          "by": "user",
-          "turn": 3,
-          "parent": null,
           "rel": "answer",
-          "replaces": "作業を始める前に読みを確認してもらう"
-        },
-        {
-          "id": "C6",
-          "content": "やりとりは非同期に進めたい",
-          "by": "user",
-          "turn": 3,
-          "parent": "C5",
-          "rel": "explanation"
+          "reason": "どこに出すかは言われていない。会話を邪魔しない場所を選んだ"
         }
       ]
     },
     {
       "id": "Q1",
       "question": "帯に何を出すか",
-      "owner": "claude",
+      "owner": "user",
       "closed": false,
       "parent": "Q0",
       "intent": {
         "quote": [],
         "reading": "会話の邪魔をせずに、いまの読みが目に入るようにする",
-        "source": "σ2"
+        "source": "σ1"
       },
+      "intent_history": [],
+      "steps": [
+        {
+          "text": "1行目に意図の読み、2行目に次の一歩",
+          "from": [],
+          "why": "2行で読みと行き先が分かる"
+        }
+      ],
       "items": [
         {
-          "id": "C2",
+          "id": "C1",
           "content": "プロンプトの上に帯を常に出す",
           "by": "claude",
-          "turn": 2,
+          "turn": 1,
           "parent": null,
           "rel": "answer",
-          "reason": "どこに出すかは言われていない。常に目に入る場所を選んだ"
+          "reason": "常に目に入る場所として選んだ"
         },
         {
-          "id": "C3",
+          "id": "C2",
           "content": "帯は2行まで",
           "by": "claude",
-          "turn": 2,
-          "parent": "C2",
-          "rel": "elaboration",
+          "turn": 1,
+          "parent": "C1",
+          "rel": "condition",
           "reason": "長いと会話が隠れる"
         }
       ]
-    },
-    {
-      "id": "Q2",
-      "question": "帯を常に出してうるさくないか",
-      "owner": "user",
-      "closed": false,
-      "parent": "Q1",
-      "intent": null,
-      "items": []
     }
   ]
 }

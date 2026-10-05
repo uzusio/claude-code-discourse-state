@@ -10,7 +10,7 @@
 
 <line x1="20" y1="175" x2="724" y2="175" stroke="#30363d"/>
 <text x="20" y="204" fill="#e6edf3">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
-<text x="20" y="226" fill="#8b949e">次：帯に意図の読みと次の一歩を出す（ほか 2）</text><text x="724" y="226" text-anchor="end" fill="#58a6ff">[ボードを開く]</text>
+<text x="20" y="226" fill="#8b949e">次：1行目に意図の読み、2行目に次の一歩</text><text x="724" y="226" text-anchor="end" fill="#58a6ff">[ボードを開く]</text>
 <line x1="20" y1="241" x2="724" y2="241" stroke="#30363d"/>
 <text x="20" y="270" fill="#e6edf3">&gt; </text>
 </svg>

@@ -48,8 +48,8 @@ test('出どころ：このターンに by=user で足した、まだ認めら�
 test('食い違い：ボードと作業をプロンプトに入れ、指摘だけを返す。ボードは書き換えない', async () => {
   const s = replay(diffs, 'audit')
   const p = buildDeviationPrompt(s, { user: '進めて', recentUser: ['進めて'], prevAssistant: '', assistant: '規準監査を飛ばしてカードを読んだ', tools: [] })
-  expect(p.includes('1. 規準監査（sonnet）')).toBe(true)
-  expect(p.includes('監査はユーザーが指示したときだけ')).toBe(true)
+  expect(p.includes('## ボード：開いている作業（意図・文脈の補完・流れ）')).toBe(true)
+  expect(p.includes('- 監査をどの範囲にかけるか')).toBe(true)
   expect(parseDeviation('{"flags": [{"text": "流れでは規準監査が先なのに飛ばした"}, {"kind": "relevance", "text": "範囲を聞かれたのに時刻に答えている"}]}')).toEqual([{ kind: 'deviation', text: '流れでは規準監査が先なのに飛ばした' }, { kind: 'relevance', text: '範囲を聞かれたのに時刻に答えている' }])
   expect(parseDeviation('{"flags": []}')).toEqual([])
 })

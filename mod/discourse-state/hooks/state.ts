@@ -15,6 +15,8 @@ export type Question = {
   id: string; question: string; opened_by: string | null; answers: string[]; parent: string | null; owner: By
   closed: boolean  // 片付いた問いも消さずに残す（QUD の木）
   intent?: Intent | null  // この作業の意図（ユーザーの言葉と Claude の読み）
+  intent_history?: Intent[]  // 書き換えられる前の読み（古い順）
+  steps?: { text: string; from: string[]; why?: string }[]  // この作業の流れ
 }
 export type State = {
   session: string; turn: number
@@ -126,10 +128,13 @@ export const validate = (s: State, diff: Diff): string[] => {
     } else if (kind === 'plan') {
       const steps = op.steps
       if (!Array.isArray(steps) || !steps.length) return void problems.push(`${where}: plan には steps が要る`)
+      // question を付けるとその作業の流れ。from は省略できる（作業の意図から出る）
+      const taskFlow = op.question !== undefined
+      if (taskFlow && !qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: plan の作業 ${JSON.stringify(op.question)} が存在しない`)
       steps.forEach((st: any, j: number) => {
         if (!st.text) problems.push(`${where}.steps[${j}]: text が要る`)
         const srcs: string[] = st.from ?? []
-        if (!srcs.length) problems.push(`${where}.steps[${j}]: from（どの意図から出た手順か）が要る`)
+        if (!srcs.length && !taskFlow) problems.push(`${where}.steps[${j}]: from（どの意図から出た手順か）が要る`)
         for (const f of srcs) {
           if (f === 'goal') { if (!hasGoal) problems.push(`${where}.steps[${j}]: 目的がまだ置かれていない`) }
           else if (!cids.has(f) && !added.has(f)) problems.push(`${where}.steps[${j}]: from ${JSON.stringify(f)} が存在しない`)
@@ -144,7 +149,7 @@ export const validate = (s: State, diff: Diff): string[] => {
       if (!rechecked.has(d) && !retracted.includes(d)) problems.push(`${d} は ${cid} に依存しているが recheck も retract もされていない`)
 
   const kinds = ops.map(o => o.op)
-  if (rel === 'Correction' && !kinds.some(k => k === 'retract' || k === 'amend')) problems.push('Correction なのに retract / amend が無い')
+  if (rel === 'Correction' && !kinds.some(k => k === 'retract' || k === 'amend' || k === 'intent')) problems.push('Correction なのに retract / amend / intent（読みの書き換え）が無い')
   if (rel === 'Acknowledge' && kinds.some(k => k !== 'none' && k !== 'confirm')) problems.push('Acknowledge なのに状態を変える op がある')
   if (rel === 'Open' && !kinds.includes('open')) problems.push('Open なのに open が無い')
   if (rel === 'Answer' && !kinds.includes('answer')) problems.push('Answer なのに answer が無い')
@@ -209,15 +214,23 @@ export const apply = (state: State, diff: Diff): State => {
       }
       case 'intent': {
         const q = find(s.questions, op.question)
-        if (q) q.intent = toIntent(op, src)
+        if (q) {
+          if (q.intent) q.intent_history = [...(q.intent_history ?? []), q.intent]
+          q.intent = toIntent(op, src)
+        }
         break
       }
       case 'goal':
         s.goal = { quote: [...op.quote], reading: op.reading, source: src }
         break
-      case 'plan':
-        s.steps = op.steps.map((st: any) => ({ text: st.text, from: [...st.from], ...(st.why ? { why: st.why } : {}) }))
+      case 'plan': {
+        const steps = op.steps.map((st: any) => ({ text: st.text, from: [...(st.from ?? [])], ...(st.why ? { why: st.why } : {}) }))
+        if (op.question) {
+          const q = find(s.questions, op.question)
+          if (q) q.steps = steps
+        } else s.steps = steps
         break
+      }
     }
   }
   // 訂正で置き換えたものは、新しい方に「何を置き換えたか」を残す（add と retract の順番によらない）
@@ -321,6 +334,8 @@ export const tasks = (s: State): Board['tasks'] => {
   return t.nodes.map((n, i) => ({
     id: n.id, question: n.question, owner: n.owner, closed: n.closed, parent: n.parent,
     intent: s.questions[i]!.intent ?? null,
+    intent_history: [...(s.questions[i]!.intent_history ?? [])],
+    steps: [...(s.questions[i]!.steps ?? [])],
     items: n.items.map(id => {
       const c = find(s.commitments, id)!
       const parent = c.depends_on.find(d => where.get(d) === n.id) ?? null

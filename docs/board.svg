@@ -1,42 +1,38 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="744" height="884" viewBox="0 0 744 884" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
-<rect width="744" height="884" rx="10" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="744" height="796" viewBox="0 0 744 796" font-family="'Cascadia Mono','Consolas','Menlo','Noto Sans Mono CJK JP','MS Gothic',monospace" font-size="15">
+<rect width="744" height="796" rx="10" fill="#0d1117"/>
 <circle cx="26" cy="20" r="6" fill="#ff5f56"/><circle cx="46" cy="20" r="6" fill="#ffbd2e"/><circle cx="66" cy="20" r="6" fill="#27c93f"/>
 <text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">ボードを開いた状態</text>
 <text x="20" y="50" fill="#58a6ff">[閉じる]</text>
 <text x="20" y="72" fill="#e6edf3" font-weight="bold">作業と意図</text>
-<text x="38" y="94" fill="#3fb950" font-weight="bold">▾ Claude の意図の読みをどう見せるか（決める人：あなた）</text>
-<text x="56" y="116" fill="#e6edf3" font-weight="bold">意図：会話を止めずに、Claude の読みとそのずれが見えるようにする</text>
-<text x="74" y="138" fill="#8b949e">「Claude が自分の意図をどう汲み取っているのか、会話しながら見たい」</text>
-<text x="56" y="160" fill="#e6edf3">答え：読みは会話を止めずに見られるようにする</text>
-<text x="56" y="182" fill="#e6edf3">答え：細かい手順は任せる。意図が合っていればいい</text>
-<text x="56" y="204" fill="#39c5cf">新 答え：読みは非同期に見られればよい（作業の前後は問わない）</text>
-<text x="74" y="226" fill="#8b949e">「作業を始める前に読みを確認してもらう」を置き換え</text>
-<text x="74" y="248" fill="#39c5cf">新 理由：やりとりは非同期に進めたい</text>
-<text x="56" y="270" fill="#3fb950" font-weight="bold">▾ 帯に何を出すか（決める人：Claude）</text>
-<text x="74" y="292" fill="#e6edf3" font-weight="bold">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
-<text x="74" y="314" fill="#e3b341">答え（補完）：プロンプトの上に帯を常に出す</text>
-<text x="92" y="336" fill="#8b949e">補った理由：どこに出すかは言われていない。常に目に入る場所を選んだ</text>
-<text x="92" y="358" fill="#e3b341">補足（補完）：帯は2行まで</text>
-<text x="110" y="380" fill="#8b949e">補った理由：長いと会話が隠れる</text>
-<text x="74" y="402" fill="#3fb950" font-weight="bold">▾ 帯を常に出してうるさくないか（決める人：あなた）</text>
+<text x="38" y="94" fill="#3fb950" font-weight="bold">▾ Claude の意図の読みをどう見せるか</text>
+<text x="56" y="116" fill="#e6edf3" font-weight="bold">意図：非同期のやりとりの中で、Claude の読みとずれをいつでも見られるよう</text>
+<text x="74" y="138" fill="#e6edf3" font-weight="bold">にする</text>
+<text x="74" y="160" fill="#8b949e">「Claude が自分の意図をどう汲み取っているのか、会話しながら見たい」</text>
+<text x="74" y="182" fill="#8b949e">「細かい手順は任せる」</text>
+<text x="74" y="204" fill="#8b949e">「作業の前か後かは関係ない。やりとりは非同期に進めたい」</text>
+<text x="74" y="226" fill="#8b949e">前の読み：作業を始める前に、Claude の読みを確かめられるようにする</text>
+<text x="56" y="248" fill="#e3b341">補完：読みはボタンで開くボードに、要点は帯に出す</text>
+<text x="74" y="270" fill="#8b949e">補った理由：どこに出すかは言われていない。会話を邪魔しない場所を選んだ</text>
+<text x="56" y="292" fill="#e6edf3">流れ</text>
+<text x="74" y="314" fill="#e6edf3">1. 帯に意図の読みと次の一歩を出す</text>
+<text x="92" y="336" fill="#8b949e">会話を止めずに読みのずれに気づける</text>
+<text x="74" y="358" fill="#e6edf3">2. ボードに作業ごとの意図・補完・流れを並べる</text>
+<text x="92" y="380" fill="#8b949e">読みがどこから来たかを確かめられる</text>
+<text x="74" y="402" fill="#e6edf3">3. 話しかけて読みを直せるようにする</text>
+<text x="92" y="424" fill="#8b949e">ずれを見つけたらその場で直せる</text>
+<text x="56" y="446" fill="#3fb950" font-weight="bold">▾ 帯に何を出すか</text>
+<text x="74" y="468" fill="#e6edf3" font-weight="bold">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
+<text x="74" y="490" fill="#e3b341">補完：プロンプトの上に帯を常に出す</text>
+<text x="92" y="512" fill="#8b949e">補った理由：常に目に入る場所として選んだ</text>
+<text x="92" y="534" fill="#e3b341">補完（条件）：帯は2行まで</text>
+<text x="110" y="556" fill="#8b949e">補った理由：長いと会話が隠れる</text>
+<text x="74" y="578" fill="#e6edf3">流れ</text>
+<text x="92" y="600" fill="#e6edf3">1. 1行目に意図の読み、2行目に次の一歩</text>
+<text x="110" y="622" fill="#8b949e">2行で読みと行き先が分かる</text>
 
-<text x="20" y="446" fill="#e6edf3" font-weight="bold">流れ</text>
-<text x="38" y="468" fill="#e6edf3">1. 帯に意図の読みと次の一歩を出す</text>
-<text x="56" y="490" fill="#8b949e">会話を止めずに、読みのずれに気づける</text>
-<text x="56" y="512" fill="#8b949e">← 「読みは会話を止めずに見られるようにする」・「プロンプトの上に帯を常</text>
-<text x="56" y="534" fill="#8b949e">に出す」</text>
-<text x="38" y="556" fill="#e6edf3">2. ボードに作業ごとの意図と決まったことを木で並べる</text>
-<text x="56" y="578" fill="#8b949e">読みがどこから来たかを確かめられる</text>
-<text x="56" y="600" fill="#8b949e">← 「読みは会話を止めずに見られるようにする」</text>
-<text x="38" y="622" fill="#e6edf3">3. 話しかけて読みを直せるようにする</text>
-<text x="56" y="644" fill="#8b949e">ずれを見つけたらその場で直せる</text>
-<text x="56" y="666" fill="#8b949e">← 「細かい手順は任せる。意図が合っていればいい」</text>
-
-<text x="20" y="710" fill="#e6edf3" font-weight="bold">▸ 置き換わったこと（1）</text>
-
-<line x1="20" y1="747" x2="724" y2="747" stroke="#30363d"/>
-<text x="20" y="776" fill="#e6edf3">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
-<text x="20" y="798" fill="#8b949e">次：帯に意図の読みと次の一歩を出す（ほか 2）</text><text x="724" y="798" text-anchor="end" fill="#58a6ff">[ボードを閉じる]</text>
-<line x1="20" y1="813" x2="724" y2="813" stroke="#30363d"/>
-<text x="20" y="842" fill="#e6edf3">&gt; </text>
+<line x1="20" y1="659" x2="724" y2="659" stroke="#30363d"/>
+<text x="20" y="688" fill="#e6edf3">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
+<text x="20" y="710" fill="#8b949e">次：1行目に意図の読み、2行目に次の一歩</text><text x="724" y="710" text-anchor="end" fill="#58a6ff">[ボードを閉じる]</text>
+<line x1="20" y1="725" x2="724" y2="725" stroke="#30363d"/>
+<text x="20" y="754" fill="#e6edf3">&gt; </text>
 </svg>

@@ -37,7 +37,7 @@ ops の種類:
   move     決まったことを別の作業へ付け替える (id, question)  ← ほかの作業の答えから外し、その作業の答えにする
   intent   作業（問い）の意図を置く・置き換える (question, quote, reading)  ← quote はユーザーの言葉、reading は Claude の読み
   goal     （旧）会話全体の目的。互換のため受け付ける。意図は作業ごとに intent で持つ
-  plan     手順を置き換える               (steps: [{text, from, why?}])  ← from は "goal" かコミットメントの id、why はなぜこの手順か
+  plan     手順を置き換える               (steps: [{text, from?, why?}], question?)  ← question を付けるとその作業の流れ。from は "goal" かコミットメントの id、why はなぜこの手順か
   none     何もしない                     （Acknowledge 用）
 """
 from __future__ import annotations
@@ -212,11 +212,14 @@ def validate(state: dict, diff: dict) -> list[str]:
             if not isinstance(steps, list) or not steps:
                 problems.append(f"{where}: plan には steps が要る")
                 continue
+            task_flow = op.get("question") is not None
+            if task_flow and op.get("question") not in qids and op.get("question") not in opened:
+                problems.append(f"{where}: plan の作業 {op.get('question')!r} が存在しない")
             for j, st in enumerate(steps):
                 if not st.get("text"):
                     problems.append(f"{where}.steps[{j}]: text が要る")
                 srcs = st.get("from") or []
-                if not srcs:
+                if not srcs and not task_flow:
                     problems.append(f"{where}.steps[{j}]: from（どの意図から出た手順か）が要る")
                 for f in srcs:
                     if f == "goal":
@@ -235,8 +238,8 @@ def validate(state: dict, diff: dict) -> list[str]:
 
     # 関係ラベルと ops の整合（緩い検査）
     kinds = [op.get("op") for op in ops]
-    if rel == "Correction" and not any(k in ("retract", "amend") for k in kinds):
-        problems.append("Correction なのに retract / amend が無い")
+    if rel == "Correction" and not any(k in ("retract", "amend", "intent") for k in kinds):
+        problems.append("Correction なのに retract / amend / intent（読みの書き換え）が無い")
     if rel == "Acknowledge" and any(k not in ("none", "confirm") for k in kinds):
         problems.append("Acknowledge なのに状態を変える op がある")
     if rel == "Open" and "open" not in kinds:
@@ -322,12 +325,20 @@ def apply(state: dict, diff: dict) -> dict:
         elif kind == "intent":
             q = _find(new["questions"], op["question"])
             if q is not None:
+                if q.get("intent"):
+                    q.setdefault("intent_history", []).append(q["intent"])
                 q["intent"] = _intent(op, src)
         elif kind == "goal":
             new["goal"] = {"quote": list(op["quote"]), "reading": op["reading"], "source": src}
         elif kind == "plan":
-            new["steps"] = [{"text": st["text"], "from": list(st["from"]), **({"why": st["why"]} if st.get("why") else {})}
-                            for st in op["steps"]]
+            steps = [{"text": st["text"], "from": list(st.get("from") or []), **({"why": st["why"]} if st.get("why") else {})}
+                     for st in op["steps"]]
+            if op.get("question"):
+                q = _find(new["questions"], op["question"])
+                if q is not None:
+                    q["steps"] = steps
+            else:
+                new["steps"] = steps
         elif kind == "none":
             pass
     # 訂正で置き換えたものは、新しい方に「何を置き換えたか」を残す（add と retract の順番によらない）
@@ -438,7 +449,8 @@ def tasks(state: dict) -> list[dict]:
                 item["replaces"] = c["replaces"]["content"]
             items.append(item)
         out.append({"id": n["id"], "question": n["question"], "owner": n["owner"], "closed": n["closed"],
-                    "parent": n["parent"], "intent": q.get("intent"), "items": items})
+                    "parent": n["parent"], "intent": q.get("intent"), "intent_history": list(q.get("intent_history", [])),
+                    "steps": list(q.get("steps", [])), "items": items})
     return out
 
 
