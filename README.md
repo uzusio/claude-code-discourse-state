@@ -68,6 +68,7 @@ flowchart LR
 ```sh
 cd poc && python -m unittest test_discourse_state            # 状態の更新規則（Python 版・仕様）
 cd mod/discourse-state && claude plugin validate . && claude plugin test .
+python tools/test.py                                         # 両方を回して test-results/junit.xml にまとめる
 npx tsx tools/render-svg.ts                                  # README の画像を描き直す
 ```
 
