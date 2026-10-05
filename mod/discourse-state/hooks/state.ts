@@ -6,10 +6,15 @@ export type By = 'user' | 'claude'
 export type Commitment = {
   id: string; content: string; source: string | null; depends_on: string[]; by: By
   reason?: string; confirmed_by?: string | null; turn: number
+  rel?: EdgeRel                              // 親（depends_on の先頭）との線の種類
+  replaces?: { id: string; content: string } // 訂正で置き換えた古い決定
 }
+export type EdgeRel = 'elaboration' | 'explanation' | 'contrast' | 'result' | 'condition'
+export type Intent = { quote: string[]; reading: string; source: string | null }
 export type Question = {
   id: string; question: string; opened_by: string | null; answers: string[]; parent: string | null; owner: By
   closed: boolean  // 片付いた問いも消さずに残す（QUD の木）
+  intent?: Intent | null  // この作業の意図（ユーザーの言葉と Claude の読み）
 }
 export type State = {
   session: string; turn: number
@@ -27,7 +32,9 @@ export type Diff = {
 
 // Contrast（並べるだけ・取り消さない）・Explanation（理由づけ）・Clarification（確かめる問い）は 2026-10-05 に SDRT から追加
 export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge', 'Contrast', 'Explanation', 'Clarification']
-export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'goal', 'plan', 'none']
+export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'intent', 'goal', 'plan', 'none']
+// 決まったこと同士の線の種類。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
+export const EDGE_RELS: EdgeRel[] = ['elaboration', 'explanation', 'contrast', 'result', 'condition']
 const BY = ['user', 'claude']
 const ID_RE = /^([CQ])(\d+)$/
 
@@ -75,6 +82,10 @@ export const validate = (s: State, diff: Diff): string[] => {
       else if (!ID_RE.test(id) || id[0] !== 'C') problems.push(`${where}: コミットメントの id は C+数字: ${JSON.stringify(id)}`)
       else seenAdded.add(id)
       for (const d of op.depends_on ?? []) if (!cids.has(d) && !seenAdded.has(d)) problems.push(`${where}: 依存先 ${d} が存在しない`)
+      if (op.rel !== undefined) {
+        if (!EDGE_RELS.includes(op.rel)) problems.push(`${where}: rel は ${EDGE_RELS.join('/')} のどれか: ${JSON.stringify(op.rel)}`)
+        else if (!(op.depends_on ?? []).length) problems.push(`${where}: rel を付けるなら depends_on（親）が要る`)
+      }
       const by = op.by ?? 'user'
       if (!BY.includes(by)) problems.push(`${where}: by は user か claude: ${JSON.stringify(by)}`)
       else if (by === 'claude' && !op.reason) problems.push(`${where}: 補った前提（by=claude）には reason が要る`)
@@ -99,9 +110,13 @@ export const validate = (s: State, diff: Diff): string[] => {
       else opened.add(id)
       if (op.parent && !qids.has(op.parent) && !opened.has(op.parent)) problems.push(`${where}: 親の問い ${JSON.stringify(op.parent)} が存在しない`)
       if (!BY.includes(op.owner ?? 'user')) problems.push(`${where}: owner は user か claude: ${JSON.stringify(op.owner)}`)
+      if (op.intent !== undefined && (typeof op.intent !== 'object' || !op.intent?.reading)) problems.push(`${where}: open の intent には reading（読み）が要る`)
     } else if (kind === 'answer') {
       if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: answer の対象 ${JSON.stringify(op.question)} が存在しない`)
       if (op.by && !cids.has(op.by) && !seenAdded.has(op.by)) problems.push(`${where}: answer の by ${JSON.stringify(op.by)} が存在しない`)
+    } else if (kind === 'intent') {
+      if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: intent の対象 ${JSON.stringify(op.question)} が存在しない`)
+      if (!op.reading) problems.push(`${where}: intent には reading（読み）が要る`)
     } else if (kind === 'goal') {
       if (!op.quote?.length || !op.reading) problems.push(`${where}: goal には quote（引用）と reading（読み）が要る`)
     } else if (kind === 'plan') {
@@ -145,6 +160,7 @@ export const apply = (state: State, diff: Diff): State => {
     switch (op.op) {
       case 'add': {
         const c: Commitment = { id: op.id, content: op.content, source: src, depends_on: [...(op.depends_on ?? [])], by: op.by ?? 'user', turn: s.turn }
+        if (op.rel) c.rel = op.rel
         if (c.by === 'claude') c.reason = op.reason
         s.commitments.push(c)
         bump(s.counters, op.id)
@@ -171,7 +187,7 @@ export const apply = (state: State, diff: Diff): State => {
         break
       }
       case 'open':
-        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user', closed: false })
+        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user', closed: false, intent: toIntent(op.intent, src) })
         bump(s.counters, op.id)
         break
       case 'answer': {
@@ -179,6 +195,11 @@ export const apply = (state: State, diff: Diff): State => {
         if (!q) break
         if (op.by && !q.answers.includes(op.by)) q.answers.push(op.by)
         if (op.complete) q.closed = true
+        break
+      }
+      case 'intent': {
+        const q = find(s.questions, op.question)
+        if (q) q.intent = toIntent(op, src)
         break
       }
       case 'goal':
@@ -189,8 +210,18 @@ export const apply = (state: State, diff: Diff): State => {
         break
     }
   }
+  // 訂正で置き換えたものは、新しい方に「何を置き換えたか」を残す（add と retract の順番によらない）
+  for (const op of diff.ops ?? []) {
+    if (op.op !== 'retract' || !op.replaced_by) continue
+    const c = find(s.commitments, op.replaced_by)
+    const old = s.retracted.find(r => r.id === op.id)
+    if (c && old) c.replaces = { id: old.id, content: old.content }
+  }
   return s
 }
+
+const toIntent = (it: any, src: string | null): Intent | null =>
+  it && it.reading ? { quote: [...(it.quote ?? [])], reading: it.reading, source: src } : null
 
 export const replay = (diffs: Diff[], session: string): State => {
   let s = emptyState(session)
@@ -268,7 +299,30 @@ export const board = (s: State, recent = 3): Board => {
     steps: s.steps.map(st => ({ ...st })),
     open: [...s.questions].reverse().filter(q => !q.closed).map(q => ({ id: q.id, question: q.question, owner: q.owner, parent: q.parent })),
     tree: tree(s),
+    tasks: tasks(s),
   }
+}
+
+// 作業（問い）の木。各作業に意図と、ぶら下がる決まったこと（親との線の種類つき）を持つ。
+// 決まったことの親：同じ作業の中で depends_on の先頭に当たるものがあればその下（線は rel、無ければ「補足」）、
+// 無ければ作業の直下（線は「答え」）。並びは開いた順・足した順。
+export const tasks = (s: State): Board['tasks'] => {
+  const t = tree(s)
+  const where = new Map(t.nodes.flatMap(n => n.items.map(id => [id, n.id] as const)))
+  return t.nodes.map((n, i) => ({
+    id: n.id, question: n.question, owner: n.owner, closed: n.closed, parent: n.parent,
+    intent: s.questions[i]!.intent ?? null,
+    items: n.items.map(id => {
+      const c = find(s.commitments, id)!
+      const parent = c.depends_on.find(d => where.get(d) === n.id) ?? null
+      return {
+        id: c.id, content: c.content, by: c.by, turn: c.turn ?? 0, parent,
+        rel: parent ? (c.rel ?? 'elaboration') : ('answer' as const),
+        ...(c.reason ? { reason: c.reason } : {}),
+        ...(c.replaces ? { replaces: c.replaces.content } : {}),
+      }
+    }),
+  }))
 }
 
 // 目的 → 問い → 決定 の木（QUD の木）。決定は答えている問いに、答えていなければ依存先の問いに付ける。

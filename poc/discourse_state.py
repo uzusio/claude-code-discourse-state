@@ -25,15 +25,17 @@ diff（JSON、1発言単位。LLM が diffs.jsonl に1行で追記する）:
            {"op": "answer", "question": "Q0", "by": "C3", "complete": false}]}
 
 ops の種類:
-  add      コミットメントを足す           (id, content, depends_on?, by?, reason?)
+  add      コミットメントを足す           (id, content, depends_on?, rel?, by?, reason?)
+                                          rel は親（depends_on の先頭）との線の種類：elaboration／explanation／contrast／result／condition
                                           by="claude" は相手が言っていない前提を補ったもの（accommodation）。reason 必須
   confirm  補った前提をユーザーが認めた   (id)          ← by を claude から user に移す（④→②）
   retract  コミットメントを消す           (id, replaced_by?)  ← 依存しているものは recheck か retract が必須
   amend    コミットメントの内容を書き直す (id, content)  ← Elaboration 用。content は書き直し後の全文
   recheck  依存先が消えたものを見直した、という宣言。状態は変えない (id, note?)
-  open     問いを積む                     (id, question, parent?, owner?)  ← owner は決める人（既定 user）
+  open     問い（作業）を積む             (id, question, parent?, owner?, intent?)  ← owner は決める人（既定 user）、intent は {quote, reading}
   answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
-  goal     目的を置く・置き換える         (quote, reading)  ← quote はユーザーの言葉の引用、reading はその読み
+  intent   作業（問い）の意図を置く・置き換える (question, quote, reading)  ← quote はユーザーの言葉、reading は Claude の読み
+  goal     （旧）会話全体の目的。互換のため受け付ける。意図は作業ごとに intent で持つ
   plan     手順を置き換える               (steps: [{text, from, why?}])  ← from は "goal" かコミットメントの id、why はなぜこの手順か
   none     何もしない                     （Acknowledge 用）
 """
@@ -51,7 +53,9 @@ RELATIONS = frozenset(
      "Explanation",    # 「〜だから」。既存の決定・問いへの理由づけ
      "Clarification"}  # 言葉の意味・範囲を確かめる問い
 )
-OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "goal", "plan", "none"})
+OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "intent", "goal", "plan", "none"})
+# 決まったこと同士の線の種類（親＝depends_on の先頭）。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
+EDGE_RELS = frozenset({"elaboration", "explanation", "contrast", "result", "condition"})
 BY = frozenset({"user", "claude"})
 
 _ID_RE = re.compile(r"^([CQ])(\d+)$")
@@ -133,6 +137,12 @@ def validate(state: dict, diff: dict) -> list[str]:
             for d in op.get("depends_on", []) or []:
                 if d not in cids and d not in seen_added:
                     problems.append(f"{where}: 依存先 {d} が存在しない")
+            erel = op.get("rel")
+            if erel is not None:
+                if erel not in EDGE_RELS:
+                    problems.append(f"{where}: rel は {sorted(EDGE_RELS)} のどれか: {erel!r}")
+                elif not op.get("depends_on"):
+                    problems.append(f"{where}: rel を付けるなら depends_on（親）が要る")
             by = op.get("by", "user")
             if by not in BY:
                 problems.append(f"{where}: by は user か claude: {by!r}")
@@ -174,12 +184,20 @@ def validate(state: dict, diff: dict) -> list[str]:
                 problems.append(f"{where}: 親の問い {parent!r} が存在しない")
             if op.get("owner", "user") not in BY:
                 problems.append(f"{where}: owner は user か claude: {op.get('owner')!r}")
+            it = op.get("intent")
+            if it is not None and (not isinstance(it, dict) or not it.get("reading")):
+                problems.append(f"{where}: open の intent には reading（読み）が要る")
         elif kind == "answer":
             qid, by = op.get("question"), op.get("by")
             if qid not in qids and qid not in opened:
                 problems.append(f"{where}: answer の対象 {qid!r} が存在しない")
             if by and by not in cids and by not in seen_added:
                 problems.append(f"{where}: answer の by {by!r} が存在しない")
+        elif kind == "intent":
+            if op.get("question") not in qids and op.get("question") not in opened:
+                problems.append(f"{where}: intent の対象 {op.get('question')!r} が存在しない")
+            if not op.get("reading"):
+                problems.append(f"{where}: intent には reading（読み）が要る")
         elif kind == "goal":
             if not op.get("quote") or not op.get("reading"):
                 problems.append(f"{where}: goal には quote（引用）と reading（読み）が要る")
@@ -245,6 +263,8 @@ def apply(state: dict, diff: dict) -> dict:
             c = {"id": op["id"], "content": op["content"], "source": src,
                  "depends_on": list(op.get("depends_on", []) or []), "by": op.get("by", "user"),
                  "turn": new["turn"]}
+            if op.get("rel"):
+                c["rel"] = op["rel"]
             if c["by"] == "claude":
                 c["reason"] = op["reason"]
             new["commitments"].append(c)
@@ -275,7 +295,8 @@ def apply(state: dict, diff: dict) -> dict:
             pass  # 宣言だけ。意味を変えるなら amend を使う
         elif kind == "open":
             new["questions"].append({"id": op["id"], "question": op["question"], "opened_by": src, "answers": [],
-                                     "parent": op.get("parent"), "owner": op.get("owner", "user"), "closed": False})
+                                     "parent": op.get("parent"), "owner": op.get("owner", "user"), "closed": False,
+                                     "intent": _intent(op.get("intent"), src)})
             _bump(new["counters"], op["id"])
         elif kind == "answer":
             q = _find(new["questions"], op["question"])
@@ -286,6 +307,10 @@ def apply(state: dict, diff: dict) -> dict:
                 q["answers"].append(by)
             if op.get("complete"):
                 q["closed"] = True
+        elif kind == "intent":
+            q = _find(new["questions"], op["question"])
+            if q is not None:
+                q["intent"] = _intent(op, src)
         elif kind == "goal":
             new["goal"] = {"quote": list(op["quote"]), "reading": op["reading"], "source": src}
         elif kind == "plan":
@@ -293,7 +318,20 @@ def apply(state: dict, diff: dict) -> dict:
                             for st in op["steps"]]
         elif kind == "none":
             pass
+    # 訂正で置き換えたものは、新しい方に「何を置き換えたか」を残す（add と retract の順番によらない）
+    for op in diff.get("ops", []):
+        if op["op"] == "retract" and op.get("replaced_by"):
+            c = _find(new["commitments"], op["replaced_by"])
+            old = next((r for r in new["retracted"] if r["id"] == op["id"]), None)
+            if c is not None and old is not None:
+                c["replaces"] = {"id": old["id"], "content": old["content"]}
     return new
+
+
+def _intent(it: dict | None, src: str | None) -> dict | None:
+    if not it or not it.get("reading"):
+        return None
+    return {"quote": list(it.get("quote") or []), "reading": it["reading"], "source": src}
 
 
 def replay(diffs: Iterable[dict], session: str, strict: bool = True) -> dict:
@@ -362,7 +400,34 @@ def board(state: dict, recent: int = 3) -> dict:
                   "parent": q.get("parent")} for q in reversed(state["questions"])
                  if not q.get("closed")],                                                    # ⑥
         "tree": tree(state),
+        "tasks": tasks(state),
     }
+
+
+def tasks(state: dict) -> list[dict]:
+    """作業（問い）の木。各作業に意図と、ぶら下がる決まったこと（親との線の種類つき）を持つ。
+
+    決まったことの親：同じ作業の中で depends_on の先頭に当たるものがあればその下（線は rel、無ければ「補足」）、
+    無ければ作業の直下（線は「答え」）。並びは開いた順・足した順。
+    """
+    t = tree(state)
+    where = {cid: n["id"] for n in t["nodes"] for cid in n["items"]}
+    out = []
+    for n, q in zip(t["nodes"], state["questions"]):
+        items = []
+        for cid in n["items"]:
+            c = _find(state["commitments"], cid)
+            parent = next((d for d in c.get("depends_on", []) if where.get(d) == n["id"]), None)
+            item = {"id": c["id"], "content": c["content"], "by": c.get("by", "user"), "turn": c.get("turn", 0),
+                    "parent": parent, "rel": (c.get("rel") or "elaboration") if parent else "answer"}
+            if c.get("reason"):
+                item["reason"] = c["reason"]
+            if c.get("replaces"):
+                item["replaces"] = c["replaces"]["content"]
+            items.append(item)
+        out.append({"id": n["id"], "question": n["question"], "owner": n["owner"], "closed": n["closed"],
+                    "parent": n["parent"], "intent": q.get("intent"), "items": items})
+    return out
 
 
 def tree(state: dict) -> dict:

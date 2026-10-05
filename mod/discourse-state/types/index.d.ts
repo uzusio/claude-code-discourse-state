@@ -13,6 +13,18 @@ export type Board = {
   steps: Step[]
   open: OpenQuestion[]
   tree: { nodes: TreeNode[]; loose: string[] }
+  tasks: Task[]
+}
+// 作業の木（board.tasks）。rel は親との線：answer＝作業への答え、ほかは決まったこと同士
+export type TaskItem = {
+  id: string; content: string; by: 'user' | 'claude'; turn: number; parent: string | null
+  rel: 'answer' | 'elaboration' | 'explanation' | 'contrast' | 'result' | 'condition'
+  reason?: string; replaces?: string
+}
+export type Task = {
+  id: string; question: string; owner: 'user' | 'claude'; closed: boolean; parent: string | null
+  intent: { quote: string[]; reading: string; source: string | null } | null
+  items: TaskItem[]
 }
 // changed：直前のターンの終わりで、ボードの中身が変わったか
 // audit：直近のターンの監査役の指摘（ボードは書き換えない）

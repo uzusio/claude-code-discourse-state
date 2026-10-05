@@ -18,4 +18,8 @@ with open(out, "w", encoding="utf-8", newline="\n") as f:
     f.write("// poc/export_fixture.py が書き出す。手で編集しない\n")
     f.write(f"export const AUDIT_DIFFS = {json.dumps(diffs, ensure_ascii=False, indent=2)} as const\n\n")
     f.write(f"export const AUDIT_BOARD = {json.dumps(board(state), ensure_ascii=False, indent=2)}\n")
+    # 作業ごとの意図と関係ラベルを含む例（README の画像にも使う）
+    self_diffs = read_diffs(os.path.join(HERE, "examples", "self.jsonl"))
+    f.write(f"\nexport const SELF_DIFFS = {json.dumps(self_diffs, ensure_ascii=False, indent=2)} as const\n\n")
+    f.write(f"export const SELF_BOARD = {json.dumps(board(replay(self_diffs, 'self')), ensure_ascii=False, indent=2)}\n")
 print(out)

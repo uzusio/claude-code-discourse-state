@@ -3,12 +3,25 @@ import { expect, test } from 'claude-code/testing'
 import { sections } from '../hooks/board'
 import { apply, board, emptyState, renderCompact, renderIds, replay, validate } from '../hooks/state'
 import type { Diff } from '../hooks/state'
-import { AUDIT_BOARD, AUDIT_DIFFS } from './fixtures'
+import { AUDIT_BOARD, AUDIT_DIFFS, SELF_BOARD, SELF_DIFFS } from './fixtures'
 
 const diffs = AUDIT_DIFFS as unknown as Diff[]
 
 test('Python 版と同じボードになる（監査ジョブの例）', async () => {
   expect(board(replay(diffs, 'audit'))).toEqual(AUDIT_BOARD)
+})
+
+test('Python 版と同じボードになる（作業ごとの意図と関係ラベルの例）', async () => {
+  const b = board(replay(SELF_DIFFS as unknown as Diff[], 'self'))
+  expect(b).toEqual(SELF_BOARD)
+  const q0 = b.tasks.find(t => t.id === 'Q0')!
+  expect(q0.intent?.reading).toBe('会話を止めずに、Claude の読みとそのずれが見えるようにする')
+  expect(q0.items.find(i => i.id === 'C5')).toEqual({
+    id: 'C5', content: '読みは非同期に見られればよい（作業の前後は問わない）', by: 'user', turn: 3, parent: null, rel: 'answer',
+    replaces: '作業を始める前に読みを確認してもらう',
+  })
+  expect(q0.items.find(i => i.id === 'C6')!.rel).toBe('explanation')
+  expect(b.tasks.find(t => t.id === 'Q1')!.parent).toBe('Q0')
 })
 
 test('補った前提に理由が無いと弾く', async () => {
