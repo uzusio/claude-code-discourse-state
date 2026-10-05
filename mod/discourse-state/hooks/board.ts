@@ -92,15 +92,12 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
 
   // 作業の木
   const items: Item[] = []
-  const children = (parent: string | null) => b.tasks.filter(t => t.parent === parent)
+  // 片付いた作業は出さない（その下の作業ごと）
+  const children = (parent: string | null) => b.tasks.filter(t => t.parent === parent && !t.closed)
   const task = (t: Task, depth: number) => {
     const key = `t:${t.id}`
-    const decided = t.items.length
-    const open = isOpen(key, !t.closed)
-    items.push({
-      key, indent: depth, tone: 'task', toggle: { open },
-      text: t.closed ? `✓ ${t.question}（決まったこと ${decided}）` : `${t.question}（決める人：${who(t.owner)}）`,
-    })
+    const open = isOpen(key, true)
+    items.push({ key, indent: depth, tone: 'task', toggle: { open }, text: `${t.question}（決める人：${who(t.owner)}）` })
     if (!open) return
     if (t.intent) {
       items.push({ key: `${key}:reading`, indent: depth + 1, tone: 'strong', text: `意図：${t.intent.reading}` })
@@ -127,6 +124,19 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
   }
   for (const r of children(null)) task(r, 0)
   if (items.length) out.push({ key: 'tasks', title: '作業と意図', items })
+
+  // どの作業にも付いていない決まったこと（古い記録など）。片付いた作業のものは出さない。消さずにたたむ
+  const loose = [...b.decided, ...b.supplemented].filter(c => b.tree.loose.includes(c.id))
+  if (loose.length) {
+    const open = isOpen('loose', false)
+    const sup = new Set(b.supplemented.map(c => c.id))
+    out.push({
+      key: 'loose', title: `どの作業にも付いていない決まったこと（${loose.length}）`, tone: 'dim', collapsible: { open },
+      items: open
+        ? loose.map(c => ({ key: `l:${c.id}`, text: `${sup.has(c.id) ? '（補完）' : ''}${c.content}`, tone: sup.has(c.id) ? ('supplemented' as const) : undefined }))
+        : [],
+    })
+  }
 
   // 流れ
   if (b.steps.length) {
