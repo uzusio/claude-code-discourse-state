@@ -5,7 +5,7 @@ import { SELF_BOARD } from './fixtures'
 test('帯の「ボードを開く」は押すとペインを開き、もう一度押すと閉じる', async ($, on) => {
   const calls: string[] = []
   on('session.id', () => ({ value: 'test' }))
-  on('env.get', () => ({ value: undefined }))
+  on('env.get', () => ({ value: '/cfg' }))
   const reads: string[] = []
   on('fs.read', (_, e) => {
     reads.push(e.path)
@@ -53,7 +53,7 @@ for (const c of cases) {
     // エンジンの代わり
     const toasts: string[] = []
     on('session.id', () => ({ value: 'test' }))
-    on('env.get', () => ({ value: undefined }))
+    on('env.get', () => ({ value: '/cfg' }))
     on('fs.read', () => ({ deny: 'no file' }))
     on('fs.write', () => ({ value: undefined }))
     on('ui.open', () => ({ value: c.placed }))

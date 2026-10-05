@@ -1,8 +1,17 @@
 import type { Board, Flag, Task, TaskItem } from '../types'
 
-// board.json の置き場：<一時フォルダ>/discourse-state/<セッション id>/board.json
-export const boardPath = (tmp: string, sessionId: string) =>
-  `${tmp.replace(/[\\/]+$/, '')}/discourse-state/${sessionId}/board.json`
+// 記録の置き場の元になる Claude の設定フォルダ：CLAUDE_CONFIG_DIR、無ければ <ホーム>/.claude（ホームは USERPROFILE、無ければ HOME）
+// 一時フォルダはクリーンアップで消えるので使わない。決められないときは黙って別の場所に落とさず投げる
+export const recordsBase = (env: { CLAUDE_CONFIG_DIR?: string; USERPROFILE?: string; HOME?: string }): string => {
+  if (env.CLAUDE_CONFIG_DIR) return env.CLAUDE_CONFIG_DIR
+  const home = env.USERPROFILE || env.HOME
+  if (home) return `${home.replace(/[\\/]+$/, '')}/.claude`
+  throw new Error('記録の置き場を決められない：CLAUDE_CONFIG_DIR・USERPROFILE・HOME のどれも無い')
+}
+
+// board.json の置き場：<Claude の設定フォルダ>/discourse-state/<セッション id>/board.json
+export const boardPath = (base: string, sessionId: string) =>
+  `${base.replace(/[\\/]+$/, '')}/discourse-state/${sessionId}/board.json`
 
 // 書きかけ・壊れたファイルは null（描かない）
 export const parseBoard = (text: string | undefined): Board | null => {

@@ -5,7 +5,8 @@ Issue #9（実測：④に出た推測のうち、ユーザーが止めたもの
 
   python poc/measure.py [セッションのフォルダ ...] [--json]
 
-引数なしなら 環境変数 TEMP（無ければ TMPDIR、無ければ /tmp）の下の discourse-state/*/diffs.jsonl をすべて読む。
+引数なしなら Claude の設定フォルダ（環境変数 CLAUDE_CONFIG_DIR、無ければ USERPROFILE か HOME の下の .claude）の
+discourse-state/*/diffs.jsonl をすべて読む。設定フォルダが決められなければ、エラーを出して終了コード 1。
 壊れた行（JSON として読めない）があれば、ファイル名と行番号を出して終了コード 1（Fail Fast）。
 """
 from __future__ import annotations
@@ -84,8 +85,18 @@ def _ratio(stopped: int, supplements: int) -> str:
     return "-" if supplements == 0 else f"{stopped / supplements:.0%}"
 
 
+def _records_base(env: dict) -> str:
+    """Claude の設定フォルダ。決められなければ ValueError（一時フォルダには落ちない）。"""
+    if env.get("CLAUDE_CONFIG_DIR"):
+        return env["CLAUDE_CONFIG_DIR"]
+    home = env.get("USERPROFILE") or env.get("HOME")
+    if home:
+        return os.path.join(home, ".claude")
+    raise ValueError("記録の置き場を決められない：CLAUDE_CONFIG_DIR・USERPROFILE・HOME のどれも無い")
+
+
 def _default_files(env: dict) -> list[str]:
-    base = env.get("TEMP") or env.get("TMPDIR") or "/tmp"
+    base = _records_base(env)
     return sorted(glob.glob(os.path.join(base, "discourse-state", "*", "diffs.jsonl")))
 
 
@@ -100,7 +111,11 @@ def main(argv: list[str] | None = None, env: dict | None = None, out=None, err=N
     args = list(sys.argv[1:] if argv is None else argv)
     as_json = "--json" in args
     args = [a for a in args if a != "--json"]
-    files = _resolve(args) if args else _default_files(env)
+    try:
+        files = _resolve(args) if args else _default_files(env)
+    except ValueError as e:
+        print(str(e), file=err)
+        return 1
     files = [f for f in files if os.path.isfile(f)]
     if not files:
         print("記録が無い", file=out)

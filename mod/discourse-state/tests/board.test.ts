@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bandLine, boardPath, parseBoard } from '../hooks/board'
+import { bandLine, boardPath, parseBoard, recordsBase } from '../hooks/board'
 
 const BOARD = {
   turn: 3,
@@ -28,8 +28,22 @@ test('帯の1行は目的の読み・補った前提・問いの数', async () =
   expect(line.open).toBe(1)
 })
 
-test('置き場は一時フォルダ/discourse-state/セッション id/board.json', async () => {
-  expect(boardPath('C:\\Temp\\', 'abc')).toBe('C:\\Temp/discourse-state/abc/board.json')
+test('置き場は<Claude の設定フォルダ>/discourse-state/セッション id/board.json', async () => {
+  expect(boardPath('C:\\cfg\\', 'abc')).toBe('C:\\cfg/discourse-state/abc/board.json')
+})
+
+test('設定フォルダは CLAUDE_CONFIG_DIR が優先', async () => {
+  expect(recordsBase({ CLAUDE_CONFIG_DIR: 'D:\\cfg', USERPROFILE: 'C:\\Users\\u', HOME: '/home/u' })).toBe('D:\\cfg')
+})
+
+test('設定フォルダは CLAUDE_CONFIG_DIR が無ければ USERPROFILE/.claude、その次に HOME/.claude', async () => {
+  expect(recordsBase({ USERPROFILE: 'C:\\Users\\u\\', HOME: '/home/u' })).toBe('C:\\Users\\u/.claude')
+  expect(recordsBase({ HOME: '/home/u' })).toBe('/home/u/.claude')
+  expect(recordsBase({ CLAUDE_CONFIG_DIR: '', USERPROFILE: '', HOME: '/home/u' })).toBe('/home/u/.claude')
+})
+
+test('設定フォルダが決められないときはエラー（一時フォルダに落ちない）', async () => {
+  expect(() => recordsBase({})).toThrow('記録の置き場を決められない')
 })
 
 // テスト環境には fs が無いので board.json は読めない。ボードなしの描画が両方の面で通ることだけ確かめる

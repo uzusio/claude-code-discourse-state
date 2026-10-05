@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
 import type { Seen } from '../types'
-import { bandLine, boardPath, nextStep, parseBoard, sections } from './board'
+import { bandLine, boardPath, nextStep, parseBoard, recordsBase, sections } from './board'
 import type { Item } from './board'
 import { apply, board, RELATIONS, renderCompact, renderIds, replay, validate } from './state'
 import { buildDeviationPrompt, DEVIATION_SYSTEM, lastExchange, parseDeviation } from './audit'
@@ -41,8 +41,12 @@ async function closePane($: EngineInterface) {
 
 async function boardDir($: EngineInterface) {
   if (dir === null) {
-    const tmp = (await $.env.get('TEMP')) ?? (await $.env.get('TMPDIR')) ?? '/tmp'
-    dir = boardPath(tmp, await $.session.id()).replace(/\/board\.json$/, '')
+    const base = recordsBase({
+      CLAUDE_CONFIG_DIR: await $.env.get('CLAUDE_CONFIG_DIR'),
+      USERPROFILE: await $.env.get('USERPROFILE'),
+      HOME: await $.env.get('HOME'),
+    })
+    dir = boardPath(base, await $.session.id()).replace(/\/board\.json$/, '')
   }
   return dir
 }

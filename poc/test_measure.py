@@ -111,9 +111,24 @@ class CliTest(unittest.TestCase):
 
     def test_no_records(self):
         with tempfile.TemporaryDirectory() as base:
-            code, out, _ = self.run_main([], {"TEMP": base})
+            code, out, _ = self.run_main([], {"CLAUDE_CONFIG_DIR": base})
             self.assertEqual(code, 0)
             self.assertIn("記録が無い", out)
+
+    def test_default_dir_falls_back_to_home_dot_claude(self):
+        with tempfile.TemporaryDirectory() as home:
+            ds = os.path.join(home, ".claude", "discourse-state")
+            os.makedirs(ds)
+            self.make_session(ds, "dddddddd4444", [json.dumps(add_claude("C0"))])
+            for key in ("USERPROFILE", "HOME"):
+                code, out, _ = self.run_main([], {key: home})
+                self.assertEqual(code, 0)
+                self.assertTrue(out.startswith("dddddddd"))
+
+    def test_no_base_dir_exits_1(self):
+        code, _, err = self.run_main([], {})
+        self.assertEqual(code, 1)
+        self.assertIn("記録の置き場を決められない", err)
 
     def test_default_dir_and_total(self):
         with tempfile.TemporaryDirectory() as base:
@@ -123,7 +138,7 @@ class CliTest(unittest.TestCase):
                                                    json.dumps(d("Correction", {"op": "retract", "id": "C0"}))])
             self.make_session(ds, "bbbbbbbb2222", [json.dumps(add_claude("C0")),
                                                    json.dumps(d("Acknowledge", {"op": "confirm", "id": "C0"}))])
-            code, out, _ = self.run_main([], {"TEMP": base})
+            code, out, _ = self.run_main([], {"CLAUDE_CONFIG_DIR": base})
             self.assertEqual(code, 0)
             lines = out.strip().splitlines()
             self.assertEqual(len(lines), 3)
