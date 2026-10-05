@@ -33,7 +33,7 @@ claude plugin install discourse-state@claude-code-discourse-state --scope projec
 
 `--scope project` はプロジェクトの `.claude/settings.json` に書き、そのリポジトリを使う人みんなに入る。自分だけに入れるなら `--scope local`（`.claude/settings.local.json`）。
 
-更新は `claude plugin update discourse-state@claude-code-discourse-state` のあと、セッションで `/reload-plugins`。
+更新は `claude plugin update discourse-state@claude-code-discourse-state` のあと、`claude` を起動し直す。
 
 ### clone して入れる
 
