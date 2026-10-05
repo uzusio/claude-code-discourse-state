@@ -41,9 +41,16 @@ export const focusTask = (b: Board): Task | null => {
 }
 
 // 帯の1行目：いま扱っている作業の意図の読み（width 桁まで）。作業に意図が無ければ旧い会話全体の目的
+// 「意図：」は描く側が付ける
 export const bandLine = (b: Board, width = 60) => {
-  const reading = focusTask(b)?.intent?.reading ?? b.goal?.reading
-  return { goal: reading ? clip(reading, width) : '意図：まだ読めていない', supplemented: b.supplemented.length, open: b.open.length }
+  const reading = focusTask(b)?.intent?.reading ?? b.goal?.reading ?? emptyNote(b)
+  return { goal: clip(reading, width), supplemented: b.supplemented.length, open: b.open.length }
+}
+
+// 開いている作業が無いとき。全部片付いたのか、まだ何も書かれていないのかを分けて言う
+export const emptyNote = (b: Board) => {
+  const done = b.tasks.filter(t => t.closed).length
+  return b.open.length === 0 && done ? `開いている作業はない（片付いた作業 ${done} 件）` : 'まだ読めていない'
 }
 
 // 帯の2行目：流れの次の一歩
@@ -139,6 +146,6 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
     for (const c of children(t.id)) task(c, d)
   }
   for (const r of children(null)) task(r, 0)
-  if (items.length) out.push({ key: 'tasks', title: '作業と意図', items })
+  out.push({ key: 'tasks', title: '作業と意図', items: items.length ? items : [{ key: 'none', tone: 'dim', text: emptyNote(b) }] })
   return out
 }

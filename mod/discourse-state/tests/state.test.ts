@@ -122,6 +122,17 @@ test('board_update の結果の手順には、作業ごとの流れ（plan {ques
   expect(renderCompact(done).includes('手順: なし')).toBe(true)
 })
 
+test('作業が全部片付いたら、帯とペインは「開いている作業はない」と片付いた件数を出す', async () => {
+  const opened = replay([{ utterance_id: 'τ1', relation: 'Open', ops: [
+    { op: 'open', id: 'Q0', question: '切り替える', owner: 'user', intent: { quote: ['切り替える'], reading: '作業場だけに入れる' } },
+  ] }] as unknown as Diff[], 'empty')
+  const done = board(apply(opened, { utterance_id: 'τ2', relation: 'Result', ops: [{ op: 'answer', question: 'Q0', complete: true }] } as unknown as Diff))
+  expect(bandLine(done, 200).goal).toBe('開いている作業はない（片付いた作業 1 件）')
+  expect(sections(done, new Set()).find(x => x.key === 'tasks')!.items.map(i => i.text)).toEqual(['開いている作業はない（片付いた作業 1 件）'])
+  // 何も書かれていないときは「まだ読めていない」（「意図：」は描く側が付けるので、ここには付けない）
+  expect(bandLine(board(emptyState('none')), 200).goal).toBe('まだ読めていない')
+})
+
 test('apply は入力を変えない', async () => {
   const s = replay(diffs.slice(0, 3), 'audit')
   const before = JSON.stringify(s)
