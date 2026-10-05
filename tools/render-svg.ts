@@ -25,7 +25,7 @@ const b = board(replay(diffs, 'example'))
 const audit: Flag[] = []
 
 // ---------------------------------------------------------------- 行に起こす（register.tsx の描き方に合わせる）
-type Tone = 'white' | 'gray' | 'yellow' | 'red' | 'cyan' | 'accent'
+type Tone = 'white' | 'gray' | 'yellow' | 'red' | 'cyan' | 'accent' | 'green'
 type Line = { indent: number; text: string; tone: Tone; bold?: boolean }
 
 const COLS = 76
@@ -56,7 +56,7 @@ for (const sec of sections(b, new Set(), audit) as Section[]) {
   push(pane, 0, sec.collapsible ? `${sec.collapsible.open ? '▾' : '▸'} ${sec.title}` : sec.title, headTone, true)
   for (const it of sec.items) {
     const d = 1 + (it.indent ?? 0)
-    if (it.toggle) { push(pane, d, `${it.toggle.open ? '▾' : '▸'} ${it.text}`, 'white', true, 1); continue }
+    if (it.toggle) { push(pane, d, `${it.toggle.open ? '▾' : '▸'} ${it.text}`, 'green', true, 1); continue }
     push(pane, d, it.text, toneOf(it), it.tone === 'strong', 1)
     for (const s of it.sub ?? []) push(pane, d + 1, s, 'gray')
   }
@@ -74,7 +74,7 @@ const LH = 22
 const CW = FONT * 0.6
 const PAD = 20
 const COLORS: Record<Tone, string> = {
-  white: '#e6edf3', gray: '#8b949e', yellow: '#e3b341', red: '#f85149', cyan: '#39c5cf', accent: '#58a6ff',
+  white: '#e6edf3', gray: '#8b949e', yellow: '#e3b341', red: '#f85149', cyan: '#39c5cf', accent: '#58a6ff', green: '#3fb950',
 }
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 

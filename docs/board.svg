@@ -4,7 +4,7 @@
 <text x="372" y="25" text-anchor="middle" fill="#8b949e" font-size="13">ボードを開いた状態</text>
 <text x="20" y="50" fill="#58a6ff">[閉じる]</text>
 <text x="20" y="72" fill="#e6edf3" font-weight="bold">作業と意図</text>
-<text x="38" y="94" fill="#e6edf3" font-weight="bold">▾ Claude の意図の読みをどう見せるか（決める人：あなた）</text>
+<text x="38" y="94" fill="#3fb950" font-weight="bold">▾ Claude の意図の読みをどう見せるか（決める人：あなた）</text>
 <text x="56" y="116" fill="#e6edf3" font-weight="bold">意図：会話を止めずに、Claude の読みとそのずれが見えるようにする</text>
 <text x="74" y="138" fill="#8b949e">「Claude が自分の意図をどう汲み取っているのか、会話しながら見たい」</text>
 <text x="56" y="160" fill="#e6edf3">答え：読みは会話を止めずに見られるようにする</text>
@@ -12,13 +12,13 @@
 <text x="56" y="204" fill="#39c5cf">新 答え：読みは非同期に見られればよい（作業の前後は問わない）</text>
 <text x="74" y="226" fill="#8b949e">「作業を始める前に読みを確認してもらう」を置き換え</text>
 <text x="74" y="248" fill="#39c5cf">新 理由：やりとりは非同期に進めたい</text>
-<text x="56" y="270" fill="#e6edf3" font-weight="bold">▾ 帯に何を出すか（決める人：Claude）</text>
+<text x="56" y="270" fill="#3fb950" font-weight="bold">▾ 帯に何を出すか（決める人：Claude）</text>
 <text x="74" y="292" fill="#e6edf3" font-weight="bold">意図：会話の邪魔をせずに、いまの読みが目に入るようにする</text>
 <text x="74" y="314" fill="#e3b341">答え（補完）：プロンプトの上に帯を常に出す</text>
 <text x="92" y="336" fill="#8b949e">補った理由：どこに出すかは言われていない。常に目に入る場所を選んだ</text>
 <text x="92" y="358" fill="#e3b341">補足（補完）：帯は2行まで</text>
 <text x="110" y="380" fill="#8b949e">補った理由：長いと会話が隠れる</text>
-<text x="74" y="402" fill="#e6edf3" font-weight="bold">▾ 帯を常に出してうるさくないか（決める人：あなた）</text>
+<text x="74" y="402" fill="#3fb950" font-weight="bold">▾ 帯を常に出してうるさくないか（決める人：あなた）</text>
 
 <text x="20" y="446" fill="#e6edf3" font-weight="bold">流れ</text>
 <text x="38" y="468" fill="#e6edf3">1. 帯に意図の読みと次の一歩を出す</text>

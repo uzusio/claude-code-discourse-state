@@ -13,6 +13,8 @@ const PANE = 'discourse-state'
 const TITLE = '意図ボード'
 const SUPPLEMENTED = 'yellow'
 const FLAGGED = 'red'
+// 作業の見出し。補完の黄色と見分けやすい緑
+const TASK = 'green'
 const DEVIATION_MODEL = 'sonnet'
 const seen = atom({ plugin: 'discourse-state', key: 'seen' } as const, { board: null, changed: false, note: null, audit: [] } as Seen)
 // ペインが開いているか。帯のボタンの表示（開く／閉じる）を切り替える
@@ -295,7 +297,13 @@ export const register: Register = on => {
     const item = (it: Item) => {
       const pad = 1 + (it.indent ?? 0) * 2
       if (it.toggle)
-        return <Box key={it.key} paddingLeft={pad}><Button key={it.key} plain label={`${it.toggle.open ? '▾' : '▸'} ${it.text}`} onPress={() => flip(it.key)} /></Box>
+        // 開閉の印だけをボタンに（ボタンの文字には色を付けられない）。作業名は緑で横に並べる
+        return (
+          <Box key={it.key} paddingLeft={pad}>
+            <Button key={it.key} plain label={it.toggle.open ? '▾' : '▸'} onPress={() => flip(it.key)} />
+            <Box flexShrink={1}><Text wrap="wrap" bold color={TASK}> {it.text}</Text></Box>
+          </Box>
+        )
       return (
         <Box key={it.key} flexDirection="column" paddingLeft={pad}>
           <Box flexShrink={1}>
