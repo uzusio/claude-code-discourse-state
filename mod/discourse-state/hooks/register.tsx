@@ -25,19 +25,18 @@ const expanded = atom({ plugin: 'discourse-state', key: 'expanded' } as const, [
 let dir: string | null = null
 
 // Esc で閉じる。入力欄の上に出るときは高さを抑える
+// 置けなかったとき（端末の幅など）は理由を出し、pane.jsonl に残す。開いたまま待つので、幅が足りれば後から出る
 async function openPane($: EngineInterface) {
-  await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, rows: 14 })
+  const r = await $.ui.open({ id: PANE, title: TITLE, focus: true, closeOnEscape: true, rows: 14 })
   await update($, opened, () => true)
+  const d = await boardDir($)
+  await $.fs.write(`${d}/pane.jsonl`, `${(await readText($, `${d}/pane.jsonl`)) ?? ''}${JSON.stringify({ at: new Date().toISOString(), ...r })}\n`).catch(() => undefined)
+  if (!r.isPlaced) $.ui.toast(`意図ボードをまだ表示できない：${r.reason}`)
 }
 
 async function closePane($: EngineInterface) {
   await $.ui.close({ id: PANE }).catch(() => undefined)
   await update($, opened, () => false)
-}
-
-async function togglePane($: EngineInterface) {
-  if (await read($, opened)) await closePane($)
-  else await openPane($)
 }
 
 async function boardDir($: EngineInterface) {
@@ -294,7 +293,8 @@ export const register: Register = on => {
             <Text dimColor wrap="truncate-end">{step ?? '流れ：まだ無い'}</Text>
           </Box>
           <Text dimColor>{tail ? ` ｜ ${tail}` : ''}  </Text>
-          <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void togglePane($)} />
+          {/* 押した直後に ui.open を呼ぶ。先に await を挟むと「押して開いた」扱いが切れ、狭い端末（144 桁未満）で置かれない */}
+          <Button key="open" label={isOpen ? 'ボードを閉じる' : 'ボードを開く'} onPress={() => void (isOpen ? closePane($) : openPane($))} />
         </Box>
       </Box>
     )
