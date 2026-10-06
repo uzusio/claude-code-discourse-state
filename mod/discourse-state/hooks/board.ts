@@ -56,11 +56,9 @@ export const bandLine = (b: Board, width = 60) => {
   return { goal: clip(reading, width), supplemented: b.supplemented.length, open: b.open.length }
 }
 
-// 開いている作業が無いとき。全部片付いたのか、まだ何も書かれていないのかを分けて言う
-export const emptyNote = (b: Board) => {
-  const done = b.tasks.filter(t => t.closed).length
-  return b.open.length === 0 && done ? `開いている作業はない（片付いた作業 ${done} 件）` : 'まだ読めていない'
-}
+// 開いている作業が無いとき。全部片付いたのか、まだ何も書かれていないのかを分けて言う（片付いた件数はペインの「片付いた作業」の欄に出る）
+export const emptyNote = (b: Board) =>
+  b.open.length === 0 && b.tasks.some(t => t.closed) ? '開いている作業はない' : 'まだ読めていない'
 
 // 帯の2行目：流れの次の一歩
 // 帯の2行目：いま扱っている作業の流れの次の一歩（作業に流れが無ければ全体の流れ）
