@@ -35,6 +35,8 @@ claude plugin install discourse-state@claude-code-discourse-state --scope projec
 
 更新は `claude plugin update discourse-state@claude-code-discourse-state` のあと、`claude` を起動し直す。
 
+帯が出ないときは、そのプロジェクトのフォルダで `claude plugin list` を実行し、`discourse-state@claude-code-discourse-state` の `Scope` と `Status` を確かめる。別のプロジェクトに入れてあるだけだと `✘ disabled` と出るので、このプロジェクトで入れ直す。
+
 ### clone して入れる
 
 clone した mod を、使いたいプロジェクトの `.claude/skills/discourse-state` にリンクする。プロジェクトの `.claude/skills/` にあるプラグインは自動で読み込まれ、mod のファイルを保存するとホットリロードされる。
