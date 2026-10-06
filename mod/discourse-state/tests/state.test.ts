@@ -37,7 +37,7 @@ test('confirm で ④ から ② に移る', async () => {
   expect(b.supplemented.some(c => c.id === 'C4')).toBe(false)
 })
 
-test('move：補完を片付いた作業へ付け替えるとボードから消える', async () => {
+test('move：補完を片付いた作業へ付け替えると、作業と意図の欄から消えて片付いた作業の欄に移る', async () => {
   const s = replay(SELF_DIFFS as unknown as Diff[], 'self')
   const d: Diff = {
     turn: 3, utterance_id: 't', relation: 'Continuation',
@@ -49,6 +49,40 @@ test('move：補完を片付いた作業へ付け替えるとボードから消�
   const shown = sections(b, new Set()).find(x => x.key === 'tasks')!.items.map(i => i.key)
   expect(shown.includes('c:C0')).toBe(false)
   expect(shown.includes('t:Q2')).toBe(false)
+  const archive = sections(b, new Set()).find(x => x.key === 'archive')!
+  expect(archive.title).toBe('片付いた作業（1）')
+  expect(archive.items).toEqual([])
+  const opened = sections(b, new Set(['archive'])).find(x => x.key === 'archive')!.items
+  expect(opened.map(i => i.key)).toEqual(['t:Q2'])
+  expect(opened[0]!.toggle).toEqual({ open: false })
+  const full = sections(b, new Set(['archive', 't:Q2'])).find(x => x.key === 'archive')!.items.map(i => i.key)
+  expect(full.includes('c:C0')).toBe(true)
+  expect(full.some(k => k.includes(':flow'))).toBe(false)
+})
+
+test('親が片付いても、開いている子は作業と意図の欄に根として残り、親は片付いた作業の欄に出る', async () => {
+  const s = replay([{ utterance_id: 'τ1', relation: 'Open', ops: [
+    { op: 'open', id: 'Q0', question: '親', owner: 'user' },
+    { op: 'open', id: 'Q1', question: '子', owner: 'user', parent: 'Q0' },
+    { op: 'answer', question: 'Q0', complete: true },
+  ] }] as unknown as Diff[], 'orphan')
+  const b = board(s)
+  const rows = sections(b, new Set()).find(x => x.key === 'tasks')!.items
+  expect(rows.find(r => r.key === 't:Q1')).toMatchObject({ indent: 0 })
+  expect(rows.some(r => r.key === 't:Q0')).toBe(false)
+  const arch = sections(b, new Set(['archive'])).find(x => x.key === 'archive')!.items
+  expect(arch.map(r => r.key)).toEqual(['t:Q0'])
+})
+
+test('片付いた作業の欄は、新しく片付けた方（後に開いた方）が先に並ぶ', async () => {
+  const s = replay([{ utterance_id: 'τ1', relation: 'Open', ops: [
+    { op: 'open', id: 'Q0', question: '先', owner: 'user' },
+    { op: 'open', id: 'Q1', question: '後', owner: 'user' },
+    { op: 'answer', question: 'Q0', complete: true },
+    { op: 'answer', question: 'Q1', complete: true },
+  ] }] as unknown as Diff[], 'order')
+  const arch = sections(board(s), new Set(['archive'])).find(x => x.key === 'archive')!.items
+  expect(arch.map(r => r.key)).toEqual(['t:Q1', 't:Q0'])
 })
 
 test('取り消したものに依存している決定を放置すると弾く', async () => {
@@ -68,7 +102,7 @@ test('足した関係：対比は取り消さない、理由づけには対象�
   expect(v({ relation: 'Clarification', ops: [{ op: 'none' }] }).some(x => x.includes('Clarification なのに open'))).toBe(true)
 })
 
-test('ペイン：作業ごとに 意図・文脈の補完・流れ の3つだけ。作業は木、片付いた作業は出さない', async () => {
+test('ペイン：作業ごとに 意図・文脈の補完・流れ の3つだけ。作業は木、片付いた作業は別の欄', async () => {
   const b = board(replay(SELF_DIFFS as unknown as Diff[], 'self'))
   const secs = (flipped: string[]) => sections(b, new Set(flipped))
   expect(secs([]).map(x => x.key)).toEqual(['tasks'])
@@ -128,6 +162,7 @@ test('作業が全部片付いたら、帯とペインは「開いている作�
   ] }] as unknown as Diff[], 'empty')
   const done = board(apply(opened, { utterance_id: 'τ2', relation: 'Result', ops: [{ op: 'answer', question: 'Q0', complete: true }] } as unknown as Diff))
   expect(bandLine(done, 200).goal).toBe('開いている作業はない（片付いた作業 1 件）')
+  expect(sections(done, new Set()).map(x => x.key)).toEqual(['tasks', 'archive'])
   expect(sections(done, new Set()).find(x => x.key === 'tasks')!.items.map(i => i.text)).toEqual(['開いている作業はない（片付いた作業 1 件）'])
   // 何も書かれていないときは「まだ読めていない」（「意図：」は描く側が付けるので、ここには付けない）
   expect(bandLine(board(emptyState('none')), 200).goal).toBe('まだ読めていない')

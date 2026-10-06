@@ -133,7 +133,7 @@ const TOOL_DESCRIPTION = `意図ボード（ユーザーが画面で見ている
 - confirm {id} … ユーザーがあなたの補完を認めた
 - retract {id, replaced_by?} … 補完を取り下げた
 - plan {question:"Q番号", steps:[{text, why:"なぜこの手順か（30字以内）"}]} … その作業の流れ。作業ごとに全体を置き換える。終わった手順は外す
-- answer {question:"Q番号", complete:true} … 作業が片付いた（ボードから消える）
+- answer {question:"Q番号", complete:true} … 作業が片付いた（ボードの「片付いた作業」へ移る）
 - move {id, question} … 補完を別の作業へ付け替える
 id は結果に出る「次の ID」から振る。結果として、検証の結果と、開いている作業と意図、最近の項目、次の ID が返る。`
 

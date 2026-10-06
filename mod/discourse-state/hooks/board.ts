@@ -77,7 +77,7 @@ export const nextStep = (b: Board) => {
 //   文脈の補完 … その読みのために Claude が補った前提（黄色、理由つき）。補完どうしの関係はラベルで
 //   流れ       … これからの手順と、手順ごとの「なぜ」
 // ユーザーが言った決定の一覧は持たない（ボードは Claude に差し込まないので記憶の助けにならず、見る側には雑音になる）。
-// 片付いた作業は出さない。監査の指摘も出さない（Claude にだけ渡す）。id は出さない。
+// 片付いた作業は「片付いた作業」の欄にたたんで残す（流れは出さない）。監査の指摘も出さない（Claude にだけ渡す）。id は出さない。
 
 export type Item = {
   key: string
@@ -113,10 +113,13 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
 
   const focus = focusTask(b)
   const items: Item[] = []
-  const children = (parent: string | null) => b.tasks.filter(t => t.parent === parent && !t.closed)
-  const task = (t: Task, depth: number) => {
+  const live = b.tasks.filter(t => !t.closed)
+  const done = b.tasks.filter(t => t.closed)
+  // 作業を木で並べる：byDefault＝既定で開くか、withFlow＝流れを出すか、kids＝子の選び方
+  type Mode = { byDefault: boolean; withFlow: boolean; kids: (id: string) => Task[] }
+  const task = (items: Item[], m: Mode, t: Task, depth: number): void => {
     const key = `t:${t.id}`
-    const open = isOpen(key, true)
+    const open = isOpen(key, m.byDefault)
     items.push({ key, indent: depth, tone: 'task', toggle: { open }, text: t.question })
     if (!open) return
     const d = depth + 1
@@ -146,15 +149,31 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
     edge(null, d)
 
     // 流れ（作業の流れ。作業に無ければ、いま扱っている作業にだけ全体の流れを出す）
-    const steps = t.steps.length ? t.steps : t.id === focus?.id ? b.steps : []
+    const steps = !m.withFlow ? [] : t.steps.length ? t.steps : t.id === focus?.id ? b.steps : []
     if (steps.length) {
       items.push({ key: `${key}:flow`, indent: d, tone: 'label', text: '流れ' })
       steps.forEach((st, i) => items.push({ key: `${key}:p:${i}`, indent: d + 1, text: `${i + 1}. ${st.text}`, ...(st.why ? { sub: [st.why] } : {}) }))
     }
 
-    for (const c of children(t.id)) task(c, d)
+    for (const c of m.kids(t.id)) task(items, m, c, d)
   }
-  for (const r of children(null)) task(r, 0)
+
+  // 作業と意図：開いている作業。親が片付いていても、開いている子は根として残す
+  const liveIds = new Set(live.map(t => t.id))
+  const liveMode: Mode = { byDefault: true, withFlow: true, kids: id => live.filter(t => t.parent === id) }
+  for (const r of live.filter(t => !t.parent || !liveIds.has(t.parent))) task(items, liveMode, r, 0)
   out.push({ key: 'tasks', title: '作業と意図', items: items.length ? items : [{ key: 'none', tone: 'dim', text: emptyNote(b) }] })
+
+  // 片付いた作業：既定ではたたむ。新しい順。流れは出さない
+  if (done.length) {
+    const open = isOpen('archive', false)
+    const archive: Item[] = []
+    if (open) {
+      const doneIds = new Set(done.map(t => t.id))
+      const doneMode: Mode = { byDefault: false, withFlow: false, kids: id => done.filter(t => t.parent === id) }
+      for (const r of done.filter(t => !t.parent || !doneIds.has(t.parent)).reverse()) task(archive, doneMode, r, 0)
+    }
+    out.push({ key: 'archive', title: `片付いた作業（${done.length}）`, tone: 'dim', collapsible: { open }, items: archive })
+  }
   return out
 }
