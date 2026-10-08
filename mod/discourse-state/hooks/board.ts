@@ -99,7 +99,8 @@ export const REL_LABEL: Record<TaskItem['rel'], string> = {
 const FLAG_LABEL: Record<Flag['kind'], string> = { deviation: '食い違い', attribution: '出どころ', relevance: '問いへの答え', unclosed: '問いの閉じ方' }
 
 // flipped は「既定の開閉から反転させた行」のキー
-export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly Flag[] = []): Section[] => {
+// full が true のときは、閉じた作業・片付いた作業の中身も含める（開閉の既定は toggle.open / collapsible.open で表す。view.json 用）
+export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly Flag[] = [], full = false): Section[] => {
   const isOpen = (key: string, byDefault: boolean) => (flipped.has(key) ? !byDefault : byDefault)
   const out: Section[] = []
 
@@ -119,7 +120,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
     const key = `t:${t.id}`
     const open = isOpen(key, m.byDefault)
     items.push({ key, indent: depth, tone: 'task', toggle: { open }, text: t.question })
-    if (!open) return
+    if (!open && !full) return
     const d = depth + 1
 
     // 意図
@@ -166,7 +167,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
   if (done.length) {
     const open = isOpen('archive', false)
     const archive: Item[] = []
-    if (open) {
+    if (open || full) {
       const doneIds = new Set(done.map(t => t.id))
       const doneMode: Mode = { byDefault: false, withFlow: false, kids: id => done.filter(t => t.parent === id) }
       for (const r of done.filter(t => !t.parent || !doneIds.has(t.parent)).reverse()) task(archive, doneMode, r, 0)
@@ -175,3 +176,29 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
   }
   return out
 }
+
+// ---------------------------------------------------------------- view.json（ダッシュボードが読む見え方の写し。契約は Issue #16）
+export const VIEW_VERSION = 1
+export type View = {
+  version: 1
+  updatedAt: string
+  session: string
+  cwd: string
+  turn: number
+  band: { goal: string; step: string | null; note: string | null }
+  sections: Section[]
+}
+
+// 純粋関数。監査の指摘は入れない（Claude にだけ渡すもの）。帯の goal は切らない
+export const view = (
+  b: Board,
+  meta: { updatedAt: string; session: string; cwd: string; turn: number; note: string | null },
+): View => ({
+  version: VIEW_VERSION,
+  updatedAt: meta.updatedAt,
+  session: meta.session,
+  cwd: meta.cwd,
+  turn: meta.turn,
+  band: { goal: bandLine(b, Number.MAX_SAFE_INTEGER).goal, step: nextStep(b), note: meta.note },
+  sections: sections(b, new Set(), [], true),
+})
