@@ -1,0 +1,6 @@
+{
+  "refs": [
+    { "name": "Issue", "pattern": "^#\\d+$", "url": "https://github.com/owner/repo/issues/{n}", "track": true },
+    { "name": "文書", "pattern": "^docs/.+\\.md$", "url": "https://github.com/owner/repo/blob/main/{ref}" }
+  ]
+}

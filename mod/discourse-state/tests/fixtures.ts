@@ -311,7 +311,9 @@ export const AUDIT_BOARD = {
           "rel": "answer",
           "replaces": "実行は 10/6 5時ごろ"
         }
-      ]
+      ],
+      "refs": [],
+      "local": false
     },
     {
       "id": "Q1",
@@ -322,9 +324,12 @@ export const AUDIT_BOARD = {
       "intent": null,
       "intent_history": [],
       "steps": [],
-      "items": []
+      "items": [],
+      "refs": [],
+      "local": false
     }
-  ]
+  ],
+  "unregistered": []
 }
 
 export const SELF_DIFFS = [
@@ -580,7 +585,9 @@ export const SELF_BOARD = {
           "rel": "answer",
           "reason": "どこに出すかは言われていない。会話を邪魔しない場所を選んだ"
         }
-      ]
+      ],
+      "refs": [],
+      "local": false
     },
     {
       "id": "Q1",
@@ -620,7 +627,692 @@ export const SELF_BOARD = {
           "rel": "condition",
           "reason": "長いと会話が隠れる"
         }
-      ]
+      ],
+      "refs": [],
+      "local": false
     }
+  ],
+  "unregistered": []
+}
+
+export const REFS_DEFS = [
+  {
+    "name": "Issue",
+    "pattern": "^#\\d+$",
+    "url": "https://github.com/owner/repo/issues/{n}",
+    "track": true
+  },
+  {
+    "name": "文書",
+    "pattern": "^docs/.+\\.md$",
+    "url": "https://github.com/owner/repo/blob/main/{ref}"
+  }
+]
+
+export const REFS_DIFFS = [
+  {
+    "turn": 1,
+    "utterance_id": "π1",
+    "text": "ログインできない不具合を直して（#12）。あと、なんでビルドが遅いのかちょっと気になる",
+    "relation": "Open",
+    "target": null,
+    "markers": [],
+    "ops": [
+      {
+        "op": "open",
+        "id": "Q0",
+        "question": "ログインできない不具合を直す",
+        "refs": [
+          "#12"
+        ],
+        "intent": {
+          "quote": [
+            "ログインできない不具合を直して（#12）"
+          ],
+          "reading": "#12 の手順でログインが通るようにする"
+        }
+      },
+      {
+        "op": "open",
+        "id": "Q1",
+        "question": "ビルドが遅い理由を調べる",
+        "local": true,
+        "intent": {
+          "quote": [
+            "なんでビルドが遅いのかちょっと気になる"
+          ],
+          "reading": "理由が分かれば足りる。直すのは別の話"
+        }
+      }
+    ]
+  },
+  {
+    "turn": 2,
+    "utterance_id": "π2",
+    "text": "設定画面も作りたい。セットアップの手順も古くなってるから書き直して",
+    "relation": "Open",
+    "target": null,
+    "markers": [],
+    "ops": [
+      {
+        "op": "open",
+        "id": "Q2",
+        "question": "設定画面を作る",
+        "intent": {
+          "quote": [
+            "設定画面も作りたい"
+          ],
+          "reading": "いまは設定ファイルを手で書く。画面から変えられるようにする"
+        }
+      },
+      {
+        "op": "open",
+        "id": "Q3",
+        "question": "セットアップの手順を書き直す",
+        "refs": [
+          "docs/setup.md"
+        ],
+        "intent": {
+          "quote": [
+            "セットアップの手順も古くなってるから書き直して"
+          ],
+          "reading": "今の手順で動くように直す"
+        }
+      }
+    ]
+  },
+  {
+    "turn": 3,
+    "utterance_id": "σ3",
+    "text": "（Claude の作業）",
+    "relation": "Elaboration",
+    "target": "Q0",
+    "markers": [],
+    "ops": [
+      {
+        "op": "ref",
+        "question": "Q0",
+        "refs": [
+          "#12",
+          "docs/login.md"
+        ]
+      },
+      {
+        "op": "open",
+        "id": "Q4",
+        "question": "ログの形を確かめる",
+        "parent": "Q0",
+        "owner": "claude"
+      },
+      {
+        "op": "answer",
+        "question": "Q4",
+        "complete": true
+      }
+    ]
+  },
+  {
+    "turn": 4,
+    "utterance_id": "π4",
+    "text": "手順の書き直しは #15 で管理してる",
+    "relation": "Elaboration",
+    "target": "Q3",
+    "markers": [],
+    "ops": [
+      {
+        "op": "ref",
+        "question": "Q3",
+        "refs": [
+          "#15",
+          "docs/setup.md"
+        ]
+      }
+    ]
+  }
+] as const
+
+export const REFS_BOARD = {
+  "turn": 4,
+  "goal": null,
+  "decided": [],
+  "replaced": [],
+  "supplemented": [],
+  "steps": [],
+  "open": [
+    {
+      "id": "Q3",
+      "question": "セットアップの手順を書き直す",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q2",
+      "question": "設定画面を作る",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q1",
+      "question": "ビルドが遅い理由を調べる",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q0",
+      "question": "ログインできない不具合を直す",
+      "owner": "user",
+      "parent": null
+    }
+  ],
+  "tree": {
+    "nodes": [
+      {
+        "id": "Q0",
+        "question": "ログインできない不具合を直す",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q1",
+        "question": "ビルドが遅い理由を調べる",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q2",
+        "question": "設定画面を作る",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q3",
+        "question": "セットアップの手順を書き直す",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q4",
+        "question": "ログの形を確かめる",
+        "owner": "claude",
+        "closed": true,
+        "parent": "Q0",
+        "items": []
+      }
+    ],
+    "loose": []
+  },
+  "tasks": [
+    {
+      "id": "Q0",
+      "question": "ログインできない不具合を直す",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "ログインできない不具合を直して（#12）"
+        ],
+        "reading": "#12 の手順でログインが通るようにする",
+        "source": "π1"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [
+        {
+          "ref": "#12",
+          "name": "Issue",
+          "url": "https://github.com/owner/repo/issues/12"
+        },
+        {
+          "ref": "docs/login.md",
+          "name": "文書",
+          "url": "https://github.com/owner/repo/blob/main/docs/login.md"
+        }
+      ],
+      "local": false
+    },
+    {
+      "id": "Q1",
+      "question": "ビルドが遅い理由を調べる",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "なんでビルドが遅いのかちょっと気になる"
+        ],
+        "reading": "理由が分かれば足りる。直すのは別の話",
+        "source": "π1"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": true
+    },
+    {
+      "id": "Q2",
+      "question": "設定画面を作る",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "設定画面も作りたい"
+        ],
+        "reading": "いまは設定ファイルを手で書く。画面から変えられるようにする",
+        "source": "π2"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": false
+    },
+    {
+      "id": "Q3",
+      "question": "セットアップの手順を書き直す",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "セットアップの手順も古くなってるから書き直して"
+        ],
+        "reading": "今の手順で動くように直す",
+        "source": "π2"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [
+        {
+          "ref": "#15",
+          "name": "Issue",
+          "url": "https://github.com/owner/repo/issues/15"
+        },
+        {
+          "ref": "docs/setup.md",
+          "name": "文書",
+          "url": "https://github.com/owner/repo/blob/main/docs/setup.md"
+        }
+      ],
+      "local": false
+    },
+    {
+      "id": "Q4",
+      "question": "ログの形を確かめる",
+      "owner": "claude",
+      "closed": true,
+      "parent": "Q0",
+      "intent": null,
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": false
+    }
+  ],
+  "unregistered": [
+    "Q2"
   ]
 }
+
+export const REFS_BOARD_NO_DEFS = {
+  "turn": 4,
+  "goal": null,
+  "decided": [],
+  "replaced": [],
+  "supplemented": [],
+  "steps": [],
+  "open": [
+    {
+      "id": "Q3",
+      "question": "セットアップの手順を書き直す",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q2",
+      "question": "設定画面を作る",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q1",
+      "question": "ビルドが遅い理由を調べる",
+      "owner": "user",
+      "parent": null
+    },
+    {
+      "id": "Q0",
+      "question": "ログインできない不具合を直す",
+      "owner": "user",
+      "parent": null
+    }
+  ],
+  "tree": {
+    "nodes": [
+      {
+        "id": "Q0",
+        "question": "ログインできない不具合を直す",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q1",
+        "question": "ビルドが遅い理由を調べる",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q2",
+        "question": "設定画面を作る",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q3",
+        "question": "セットアップの手順を書き直す",
+        "owner": "user",
+        "closed": false,
+        "parent": null,
+        "items": []
+      },
+      {
+        "id": "Q4",
+        "question": "ログの形を確かめる",
+        "owner": "claude",
+        "closed": true,
+        "parent": "Q0",
+        "items": []
+      }
+    ],
+    "loose": []
+  },
+  "tasks": [
+    {
+      "id": "Q0",
+      "question": "ログインできない不具合を直す",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "ログインできない不具合を直して（#12）"
+        ],
+        "reading": "#12 の手順でログインが通るようにする",
+        "source": "π1"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [
+        {
+          "ref": "#12"
+        },
+        {
+          "ref": "docs/login.md"
+        }
+      ],
+      "local": false
+    },
+    {
+      "id": "Q1",
+      "question": "ビルドが遅い理由を調べる",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "なんでビルドが遅いのかちょっと気になる"
+        ],
+        "reading": "理由が分かれば足りる。直すのは別の話",
+        "source": "π1"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": true
+    },
+    {
+      "id": "Q2",
+      "question": "設定画面を作る",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "設定画面も作りたい"
+        ],
+        "reading": "いまは設定ファイルを手で書く。画面から変えられるようにする",
+        "source": "π2"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": false
+    },
+    {
+      "id": "Q3",
+      "question": "セットアップの手順を書き直す",
+      "owner": "user",
+      "closed": false,
+      "parent": null,
+      "intent": {
+        "quote": [
+          "セットアップの手順も古くなってるから書き直して"
+        ],
+        "reading": "今の手順で動くように直す",
+        "source": "π2"
+      },
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [
+        {
+          "ref": "#15"
+        },
+        {
+          "ref": "docs/setup.md"
+        }
+      ],
+      "local": false
+    },
+    {
+      "id": "Q4",
+      "question": "ログの形を確かめる",
+      "owner": "claude",
+      "closed": true,
+      "parent": "Q0",
+      "intent": null,
+      "intent_history": [],
+      "steps": [],
+      "items": [],
+      "refs": [],
+      "local": false
+    }
+  ],
+  "unregistered": []
+}
+
+export const REFS_UNREGISTERED = ["Q2"]
+
+export const REFS_VALIDATION = [
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2",
+          "refs": [
+            "#20"
+          ]
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": []
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2",
+          "refs": [
+            "PROJ-1",
+            "#20"
+          ]
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: 参照 \"PROJ-1\" はこのプロジェクトの参照の形に合わない。使える参照：Issue（^#\\d+$） ／ 文書（^docs/.+\\.md$）"
+    ]
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2",
+          "refs": [
+            "PROJ-1"
+          ]
+        }
+      ]
+    },
+    "withDefs": false,
+    "problems": []
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2"
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: ref には refs か local が要る"
+    ]
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q9",
+          "local": true
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: ref の対象 \"Q9\" が存在しない"
+    ]
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2",
+          "refs": [
+            "#20",
+            "#20"
+          ],
+          "local": "yes"
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: refs が重複している: #20",
+      "ops[0]: local は真偽値: \"yes\""
+    ]
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "ref",
+          "question": "Q2",
+          "refs": [
+            "",
+            3
+          ]
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: refs は空でない文字列の配列: [\"\",3]"
+    ]
+  },
+  {
+    "diff": {
+      "turn": 5,
+      "utterance_id": "π5",
+      "relation": "Elaboration",
+      "ops": [
+        {
+          "op": "open",
+          "id": "Q5",
+          "question": "x",
+          "refs": [
+            "docs/x.md",
+            "x"
+          ],
+          "local": false
+        }
+      ]
+    },
+    "withDefs": true,
+    "problems": [
+      "ops[0]: 参照 \"x\" はこのプロジェクトの参照の形に合わない。使える参照：Issue（^#\\d+$） ／ 文書（^docs/.+\\.md$）"
+    ]
+  }
+]

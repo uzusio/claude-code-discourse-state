@@ -8,8 +8,11 @@ state（JSON）:
   {"session": str, "turn": int,
    "goal":        {"quote": [str, ...], "reading": str, "source": "π1"} | None,       # 問いの木の根（ボード①）
    "questions":   [{"id": "Q0", "question": str, "opened_by": "π1", "answers": ["C2", ...],
-                    "parent": "Q0" | None, "owner": "user" | "claude", "closed": bool}, ...],  # 末尾が最上位（⑥）
+                    "parent": "Q0" | None, "owner": "user" | "claude", "closed": bool,
+                    "refs": ["#19", ...], "local": bool}, ...],                      # 末尾が最上位（⑥）
                                                                                      # 片付いた問いも消さずに残す（QUD の木）
+                                                                                     # refs はプロジェクトの管理の単位（Issue など）への参照、
+                                                                                     # local はその場で終わる問いの印
    "commitments": [{"id": "C2", "content": str, "source": "π2", "depends_on": ["C1", ...],
                     "by": "user" | "claude", "reason": str?, "turn": int}, ...],      # by=user が②、by=claude が④
    "retracted":   [{"id": "C1", "content": str, "turn": 3, "source": "π3", "replaced_by": "C3" | None}, ...],  # ③
@@ -32,13 +35,20 @@ ops の種類:
   retract  コミットメントを消す           (id, replaced_by?)  ← 依存しているものは recheck か retract が必須
   amend    コミットメントの内容を書き直す (id, content)  ← Elaboration 用。content は書き直し後の全文
   recheck  依存先が消えたものを見直した、という宣言。状態は変えない (id, note?)
-  open     問い（作業）を積む             (id, question, parent?, owner?, intent?)  ← owner は決める人（既定 user）、intent は {quote, reading}
-  answer   問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
+  open     問い（作業）を積む             (id, question, parent?, owner?, intent?, refs?, local?)  ← owner は決める人（既定 user）、intent は {quote, reading}
+                                          refs は参照（空でない文字列の配列、重複なし）、local はその場で終わる問いの印（真偽値）
+  ref      作業の参照・印を置き換える     (question, refs?, local?)  ← refs を渡せば参照を置き換える（[] で外す）、local を渡せば印を置き換える
+  answer  問いに答える                   (question, by?, complete?)  ← complete なら問いを閉じる（消さない）
   move     決まったことを別の作業へ付け替える (id, question)  ← ほかの作業の答えから外し、その作業の答えにする
   intent   作業（問い）の意図を置く・置き換える (question, quote, reading)  ← quote はユーザーの言葉、reading は Claude の読み
   goal     （旧）会話全体の目的。互換のため受け付ける。意図は作業ごとに intent で持つ
   plan     手順を置き換える               (steps: [{text, from?, why?}], question?)  ← question を付けるとその作業の流れ。from は "goal" かコミットメントの id、why はなぜこの手順か
   none     何もしない                     （Acknowledge 用）
+
+参照の定義（refdefs。プロジェクトの .claude/discourse-state.json の "refs"。読むのは mod で、ここには引数で渡す）:
+  [{"name": "Issue", "pattern": "^#\\d+$", "url": "https://github.com/owner/repo/issues/{n}", "track": true}, ...]
+  name・pattern（正規表現）は必須。url の {n} は参照の中の最初の数字の並び、{ref} は参照そのもの。
+  track は管理の単位（これに合う参照を持たない作業は「未登録」）。
 """
 from __future__ import annotations
 
@@ -54,7 +64,7 @@ RELATIONS = frozenset(
      "Explanation",    # 「〜だから」。既存の決定・問いへの理由づけ
      "Clarification"}  # 言葉の意味・範囲を確かめる問い
 )
-OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "move", "intent", "goal", "plan", "none"})
+OPS = frozenset({"add", "confirm", "retract", "amend", "recheck", "open", "answer", "move", "intent", "goal", "plan", "ref", "none"})
 # 決まったこと同士の線の種類（親＝depends_on の先頭）。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
 EDGE_RELS = frozenset({"elaboration", "explanation", "contrast", "result", "condition"})
 BY = frozenset({"user", "claude"})
@@ -93,12 +103,73 @@ def _bump(counters: dict, id_: str) -> None:
         counters[kind] = max(counters.get(kind, -1), n)
 
 
+# ---------------------------------------------------------------- 参照（作業をプロジェクトの管理の単位に結び付ける）
+
+def _matches(refdef: dict, ref: str) -> bool:
+    return re.search(refdef["pattern"], ref) is not None
+
+
+def resolve_ref(ref: str, refdefs: list[dict] | None) -> dict:
+    """参照を、合う最初の定義の名前と URL つきにする。合う定義が無ければ参照だけ。"""
+    out: dict = {"ref": ref}
+    d = next((d for d in refdefs or [] if _matches(d, ref)), None)
+    if d is None:
+        return out
+    out["name"] = d["name"]
+    url = d.get("url")
+    if url:
+        n = re.search(r"\d+", ref)
+        if "{n}" not in url or n:  # {n} を使うのに参照に数字が無ければ URL は作らない
+            out["url"] = url.replace("{n}", n.group(0) if n else "").replace("{ref}", ref)
+    return out
+
+
+def unregistered(state: dict, refdefs: list[dict] | None) -> list[str]:
+    """未登録の作業：閉じていない作業のうち、local でなく、track の定義のどれにも合う参照を持たないものの id。
+
+    track の定義が無ければ常に空。並びは開いた順。
+    """
+    tracked = [d for d in refdefs or [] if d.get("track")]
+    if not tracked:
+        return []
+    return [q["id"] for q in state["questions"]
+            if not q.get("closed") and not q.get("local")
+            and not any(_matches(d, r) for r in q.get("refs", []) for d in tracked)]
+
+
+def _js(v: Any) -> str:
+    """値を JSON.stringify と同じ書き方にする（参照まわりの問題の文面を TypeScript 版と一字一句そろえる）。"""
+    return json.dumps(v, ensure_ascii=False, separators=(",", ":"))
+
+
+def _check_refs(where: str, op: dict, refdefs: list[dict] | None) -> list[str]:
+    """open・ref の refs と local の形。定義を渡されたら、どの pattern にも合わない参照も突き返す。"""
+    problems: list[str] = []
+    if "refs" in op:
+        refs = op["refs"]
+        if not isinstance(refs, list) or not all(isinstance(r, str) and r for r in refs):
+            problems.append(f"{where}: refs は空でない文字列の配列: {_js(refs)}")
+        else:
+            dup = sorted({r for r in refs if refs.count(r) > 1})
+            if dup:
+                problems.append(f"{where}: refs が重複している: {', '.join(dup)}")
+            if refdefs:
+                kinds = " ／ ".join(f"{d['name']}（{d['pattern']}）" for d in refdefs)
+                for r in refs:
+                    if not any(_matches(d, r) for d in refdefs):
+                        problems.append(f"{where}: 参照 {_js(r)} はこのプロジェクトの参照の形に合わない。使える参照：{kinds}")
+    if "local" in op and not isinstance(op["local"], bool):
+        problems.append(f"{where}: local は真偽値: {_js(op['local'])}")
+    return problems
+
+
 # ---------------------------------------------------------------- validate
 
-def validate(state: dict, diff: dict) -> list[str]:
+def validate(state: dict, diff: dict, refdefs: list[dict] | None = None) -> list[str]:
     """diff が state に対して成立するか。問題の一覧を返す（空なら合格）。
 
     ここで見るのは構造だけ。「その差分が発言の正しい読みか」は見ない（それは判定機の仕事）。
+    refdefs（参照の定義）を渡されたときは、定義のどれにも合わない参照を突き返す。渡されなければ参照は何でもよい。
     """
     problems: list[str] = []
     rel = diff.get("relation")
@@ -188,6 +259,13 @@ def validate(state: dict, diff: dict) -> list[str]:
             it = op.get("intent")
             if it is not None and (not isinstance(it, dict) or not it.get("reading")):
                 problems.append(f"{where}: open の intent には reading（読み）が要る")
+            problems.extend(_check_refs(where, op, refdefs))
+        elif kind == "ref":
+            if op.get("question") not in qids and op.get("question") not in opened:
+                problems.append(f"{where}: ref の対象 {_js(op.get('question'))} が存在しない")
+            if "refs" not in op and "local" not in op:
+                problems.append(f"{where}: ref には refs か local が要る")
+            problems.extend(_check_refs(where, op, refdefs))
         elif kind == "answer":
             qid, by = op.get("question"), op.get("by")
             if qid not in qids and qid not in opened:
@@ -305,8 +383,16 @@ def apply(state: dict, diff: dict) -> dict:
         elif kind == "open":
             new["questions"].append({"id": op["id"], "question": op["question"], "opened_by": src, "answers": [],
                                      "parent": op.get("parent"), "owner": op.get("owner", "user"), "closed": False,
-                                     "intent": _intent(op.get("intent"), src)})
+                                     "intent": _intent(op.get("intent"), src),
+                                     "refs": list(op.get("refs") or []), "local": bool(op.get("local", False))})
             _bump(new["counters"], op["id"])
+        elif kind == "ref":
+            q = _find(new["questions"], op["question"])
+            if q is not None:
+                if "refs" in op:
+                    q["refs"] = list(op["refs"])
+                if "local" in op:
+                    q["local"] = op["local"]
         elif kind == "answer":
             q = _find(new["questions"], op["question"])
             if q is None:
@@ -400,10 +486,11 @@ def render(state: dict) -> str:
     return "\n".join(lines)
 
 
-def board(state: dict, recent: int = 3) -> dict:
+def board(state: dict, recent: int = 3, refdefs: list[dict] | None = None) -> dict:
     """意図ボード（6項目）を state から導出する。mod はこれを描くだけ。
 
     ② と ④ は同じコミットメントの by で分けるので、同じ中身が両方に載ることはない。
+    refdefs（参照の定義）は、作業の参照に名前と URL を付けるのと、未登録の作業（unregistered）を出すのに使う。
     """
     def item(c: dict) -> dict:
         out = {"id": c["id"], "content": c["content"], "source": c.get("source"), "turn": c.get("turn", 0)}
@@ -423,11 +510,12 @@ def board(state: dict, recent: int = 3) -> dict:
                   "parent": q.get("parent")} for q in reversed(state["questions"])
                  if not q.get("closed")],                                                    # ⑥
         "tree": tree(state),
-        "tasks": tasks(state),
+        "tasks": tasks(state, refdefs),
+        "unregistered": unregistered(state, refdefs),
     }
 
 
-def tasks(state: dict) -> list[dict]:
+def tasks(state: dict, refdefs: list[dict] | None = None) -> list[dict]:
     """作業（問い）の木。各作業に意図と、ぶら下がる決まったこと（親との線の種類つき）を持つ。
 
     決まったことの親：同じ作業の中で depends_on の先頭に当たるものがあればその下（線は rel、無ければ「補足」）、
@@ -450,7 +538,8 @@ def tasks(state: dict) -> list[dict]:
             items.append(item)
         out.append({"id": n["id"], "question": n["question"], "owner": n["owner"], "closed": n["closed"],
                     "parent": n["parent"], "intent": q.get("intent"), "intent_history": list(q.get("intent_history", [])),
-                    "steps": list(q.get("steps", [])), "items": items})
+                    "steps": list(q.get("steps", [])), "items": items,
+                    "refs": [resolve_ref(r, refdefs) for r in q.get("refs", [])], "local": bool(q.get("local"))})
     return out
 
 

@@ -1,6 +1,6 @@
 {
   "name": "discourse-state",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "意図ボード：Claude がユーザーの意図をどう汲み取っているかを、プロンプトの上の帯とペインに出す",
   "types": "./types/index.d.ts",
   "author": {

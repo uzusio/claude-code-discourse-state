@@ -3,13 +3,14 @@
 実行（poc/ で）: python -m unittest test_discourse_state
 """
 import copy
+import json
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from discourse_state import (  # noqa: E402
-    apply, board, dependents, empty_state, next_ids, read_diffs, render, replay, validate)
+    apply, board, dependents, empty_state, next_ids, read_diffs, render, replay, resolve_ref, unregistered, validate)
 
 # --- A/B 例の正しい読み（3発言分の差分） ---------------------------------
 D1 = {
@@ -291,6 +292,109 @@ class IntentBoard(unittest.TestCase):
         d = {"turn": 1, "utterance_id": "π1", "relation": "Continuation",
              "ops": [{"op": "plan", "steps": [{"text": "a", "from": ["goal"]}]}]}
         self.assertTrue(any("目的" in x for x in validate(empty_state("t"), d)))
+
+
+EXAMPLES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "examples")
+with open(os.path.join(EXAMPLES, "refs.defs.json"), encoding="utf-8") as _f:
+    REFDEFS = json.load(_f)["refs"]
+
+
+def _opened(**op):
+    """作業を1つ開いた状態。op は open に足す項目。"""
+    d = {"turn": 1, "utterance_id": "π1", "relation": "Open",
+         "ops": [{"op": "open", "id": "Q0", "question": "作業", **op}]}
+    return replay([d], "t")
+
+
+def _diff(*ops, relation="Elaboration"):
+    return {"turn": 2, "utterance_id": "π2", "relation": relation, "ops": list(ops)}
+
+
+class Refs(unittest.TestCase):
+    """作業をプロジェクトの管理の単位（Issue など）に結び付ける参照と、その場で終わる問いの印（#19）。"""
+
+    def test_open_keeps_refs_and_local(self):
+        s = _opened(refs=["#12"], local=True)
+        q = s["questions"][0]
+        self.assertEqual((q["refs"], q["local"]), (["#12"], True))
+        plain = _opened()["questions"][0]
+        self.assertEqual((plain["refs"], plain["local"]), ([], False), "既定は参照なし・印なし")
+
+    def test_ref_replaces_removes_and_sets_local_only(self):
+        s = _opened(refs=["#12"])
+        d = _diff({"op": "ref", "question": "Q0", "refs": ["#13", "docs/a.md"]})
+        self.assertEqual(validate(s, d), [])
+        s2 = apply(s, d)
+        self.assertEqual(s2["questions"][0]["refs"], ["#13", "docs/a.md"], "置き換える（足すのではない）")
+        s3 = apply(s2, _diff({"op": "ref", "question": "Q0", "refs": []}))
+        self.assertEqual(s3["questions"][0]["refs"], [], "[] で外す")
+        s4 = apply(s2, _diff({"op": "ref", "question": "Q0", "local": True}))
+        self.assertEqual((s4["questions"][0]["refs"], s4["questions"][0]["local"]), (["#13", "docs/a.md"], True),
+                         "local だけなら参照は変えない")
+        self.assertEqual(s["questions"][0]["refs"], ["#12"], "入力は変えない")
+
+    def test_ref_needs_refs_or_local_and_existing_question(self):
+        p = validate(_opened(), _diff({"op": "ref", "question": "Q0"}))
+        self.assertEqual(p, ["ops[0]: ref には refs か local が要る"])
+        p = validate(_opened(), _diff({"op": "ref", "question": "Q9", "local": True}))
+        self.assertEqual(p, ['ops[0]: ref の対象 "Q9" が存在しない'])
+
+    def test_shape_errors(self):
+        s = _opened()
+        cases = [
+            ({"op": "ref", "question": "Q0", "refs": "#12"}, 'ops[0]: refs は空でない文字列の配列: "#12"'),
+            ({"op": "ref", "question": "Q0", "refs": ["#12", ""]}, 'ops[0]: refs は空でない文字列の配列: ["#12",""]'),
+            ({"op": "ref", "question": "Q0", "refs": ["#12", "#12"]}, "ops[0]: refs が重複している: #12"),
+            ({"op": "ref", "question": "Q0", "local": "yes"}, 'ops[0]: local は真偽値: "yes"'),
+            ({"op": "open", "id": "Q1", "question": "x", "refs": [1]}, "ops[0]: refs は空でない文字列の配列: [1]"),
+        ]
+        for op, want in cases:
+            with self.subTest(op=op):
+                self.assertEqual(validate(s, _diff(op, relation="Continuation")), [want])
+
+    def test_refs_must_match_definitions_when_given(self):
+        s = _opened()
+        d = _diff({"op": "ref", "question": "Q0", "refs": ["#12", "PROJ-1"]})
+        self.assertEqual(validate(s, d), [], "定義が無ければ何でもよい")
+        p = validate(s, d, REFDEFS)
+        self.assertEqual(p, ['ops[0]: 参照 "PROJ-1" はこのプロジェクトの参照の形に合わない。'
+                             '使える参照：Issue（^#\\d+$） ／ 文書（^docs/.+\\.md$）'])
+        self.assertEqual(validate(s, _diff({"op": "open", "id": "Q1", "question": "x", "refs": ["docs/a.md"]},
+                                           relation="Continuation"), REFDEFS), [])
+
+    def test_resolve_ref(self):
+        self.assertEqual(resolve_ref("#12", REFDEFS),
+                         {"ref": "#12", "name": "Issue", "url": "https://github.com/owner/repo/issues/12"})
+        self.assertEqual(resolve_ref("docs/a.md", REFDEFS),
+                         {"ref": "docs/a.md", "name": "文書", "url": "https://github.com/owner/repo/blob/main/docs/a.md"})
+        self.assertEqual(resolve_ref("PROJ-1", REFDEFS), {"ref": "PROJ-1"}, "合う定義が無ければ参照だけ")
+        self.assertEqual(resolve_ref("#12", None), {"ref": "#12"})
+        self.assertEqual(resolve_ref("x", [{"name": "番号", "pattern": "x", "url": "u/{n}"}]), {"ref": "x", "name": "番号"},
+                         "{n} に当たる数字が無ければ URL は作らない")
+
+    def test_unregistered(self):
+        s = replay(read_diffs(os.path.join(EXAMPLES, "refs.jsonl")), "refs")
+        # Q0・Q3 は Issue（track）を持つ、Q1 は local、Q4 は片付いている。残るのは参照の無い Q2 だけ
+        self.assertEqual(unregistered(s, REFDEFS), ["Q2"])
+        self.assertEqual(board(s, refdefs=REFDEFS)["unregistered"], ["Q2"])
+        self.assertEqual(unregistered(s, None), [], "定義が無ければ空")
+        untracked = [dict(d, track=False) for d in REFDEFS]
+        self.assertEqual(unregistered(s, untracked), [], "track の定義が無ければ空")
+        # 文書（track でない）だけの参照は登録にならない
+        only_doc = apply(s, _diff({"op": "ref", "question": "Q3", "refs": ["docs/setup.md"]}))
+        self.assertEqual(unregistered(only_doc, REFDEFS), ["Q2", "Q3"])
+        # local を外すと未登録に戻る
+        unlocal = apply(s, _diff({"op": "ref", "question": "Q1", "local": False}))
+        self.assertEqual(unregistered(unlocal, REFDEFS), ["Q1", "Q2"])
+
+    def test_board_tasks_carry_resolved_refs(self):
+        s = replay(read_diffs(os.path.join(EXAMPLES, "refs.jsonl")), "refs")
+        tasks = {t["id"]: t for t in board(s, refdefs=REFDEFS)["tasks"]}
+        self.assertEqual([r["ref"] for r in tasks["Q0"]["refs"]], ["#12", "docs/login.md"])
+        self.assertEqual(tasks["Q0"]["refs"][0]["url"], "https://github.com/owner/repo/issues/12")
+        self.assertTrue(tasks["Q1"]["local"])
+        plain = {t["id"]: t for t in board(s)["tasks"]}
+        self.assertEqual(plain["Q0"]["refs"], [{"ref": "#12"}, {"ref": "docs/login.md"}], "定義が無ければ参照だけ")
 
 
 if __name__ == "__main__":

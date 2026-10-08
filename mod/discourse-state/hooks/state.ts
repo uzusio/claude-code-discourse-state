@@ -1,5 +1,5 @@
 // 会話の状態（SDRT の関係ラベル＋QUD の問いのスタック）を差分で更新する純粋関数。
-// poc/discourse_state.py の移植。両者は poc/examples/audit_job.jsonl で同じ結果になることをテストで確かめる。
+// poc/discourse_state.py の移植。両者は poc/examples/ の例（audit_job・self・refs）で同じ結果になることをテストで確かめる。
 import type { Board } from '../types'
 
 export type By = 'user' | 'claude'
@@ -17,7 +17,12 @@ export type Question = {
   intent?: Intent | null  // この作業の意図（ユーザーの言葉と Claude の読み）
   intent_history?: Intent[]  // 書き換えられる前の読み（古い順）
   steps?: { text: string; from: string[]; why?: string }[]  // この作業の流れ
+  refs?: string[]  // プロジェクトの管理の単位（Issue など）への参照（#19）
+  local?: boolean  // その場で終わる問いの印
 }
+// 参照の定義（プロジェクトの .claude/discourse-state.json の "refs"）。読むのは register.tsx で、ここには引数で渡す
+// url の {n} は参照の中の最初の数字の並び、{ref} は参照そのもの。track は管理の単位
+export type RefDef = { name: string; pattern: string; url?: string; track?: boolean }
 export type State = {
   session: string; turn: number
   goal: { quote: string[]; reading: string; source: string | null } | null
@@ -34,7 +39,7 @@ export type Diff = {
 
 // Contrast（並べるだけ・取り消さない）・Explanation（理由づけ）・Clarification（確かめる問い）は 2026-10-05 に SDRT から追加
 export const RELATIONS = ['Correction', 'Elaboration', 'Continuation', 'Result', 'Condition', 'Answer', 'Open', 'Acknowledge', 'Contrast', 'Explanation', 'Clarification']
-export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'move', 'intent', 'goal', 'plan', 'none']
+export const OPS = ['add', 'confirm', 'retract', 'amend', 'recheck', 'open', 'answer', 'move', 'intent', 'goal', 'plan', 'ref', 'none']
 // 決まったこと同士の線の種類。作業への「答え」と、置き換えの「訂正」は別の仕組みで表す
 export const EDGE_RELS: EdgeRel[] = ['elaboration', 'explanation', 'contrast', 'result', 'condition']
 const BY = ['user', 'claude']
@@ -56,8 +61,82 @@ const bump = (counters: State['counters'], id: string) => {
   if (m) counters[m[1] as 'C' | 'Q'] = Math.max(counters[m[1] as 'C' | 'Q'], Number(m[2]))
 }
 
+// ---------------------------------------------------------------- 参照（作業をプロジェクトの管理の単位に結び付ける。#19）
+
+const matches = (d: RefDef, ref: string) => new RegExp(d.pattern).test(ref)
+
+// 参照を、合う最初の定義の名前と URL つきにする。合う定義が無ければ参照だけ
+export const resolveRef = (ref: string, defs: readonly RefDef[] | null = null): { ref: string; name?: string; url?: string } => {
+  const d = (defs ?? []).find(x => matches(x, ref))
+  if (!d) return { ref }
+  const n = /\d+/.exec(ref)?.[0]
+  // {n} を使うのに参照に数字が無ければ URL は作らない
+  const url = d.url && (!d.url.includes('{n}') || n !== undefined) ? d.url.split('{n}').join(n ?? '').split('{ref}').join(ref) : undefined
+  return { ref, name: d.name, ...(url ? { url } : {}) }
+}
+
+// 未登録の作業：閉じていない作業のうち、local でなく、track の定義のどれにも合う参照を持たないものの id。
+// track の定義が無ければ常に空。並びは開いた順
+export const unregistered = (s: State, defs: readonly RefDef[] | null = null): string[] => {
+  const tracked = (defs ?? []).filter(d => d.track)
+  if (!tracked.length) return []
+  return s.questions
+    .filter(q => !q.closed && !q.local && !(q.refs ?? []).some(r => tracked.some(d => matches(d, r))))
+    .map(q => q.id)
+}
+
+// open・ref の refs と local の形。定義を渡されたら、どの pattern にも合わない参照も突き返す
+const checkRefs = (where: string, op: Op, defs: readonly RefDef[] | null): string[] => {
+  const problems: string[] = []
+  if ('refs' in op) {
+    const refs = op.refs
+    if (!Array.isArray(refs) || !refs.every(r => typeof r === 'string' && r)) problems.push(`${where}: refs は空でない文字列の配列: ${JSON.stringify(refs)}`)
+    else {
+      const dup = [...new Set(refs.filter((r: string) => refs.indexOf(r) !== refs.lastIndexOf(r)))].sort()
+      if (dup.length) problems.push(`${where}: refs が重複している: ${dup.join(', ')}`)
+      if (defs?.length) {
+        const kinds = defs.map(d => `${d.name}（${d.pattern}）`).join(' ／ ')
+        for (const r of refs as string[])
+          if (!defs.some(d => matches(d, r))) problems.push(`${where}: 参照 ${JSON.stringify(r)} はこのプロジェクトの参照の形に合わない。使える参照：${kinds}`)
+      }
+    }
+  }
+  if ('local' in op && typeof op.local !== 'boolean') problems.push(`${where}: local は真偽値: ${JSON.stringify(op.local)}`)
+  return problems
+}
+
+// 参照の定義ファイル（.claude/discourse-state.json）の中身を読む。壊れている（JSON として読めない・必須項目が無い・正規表現が不正）ときは
+// 定義なし（defs: null）と、何が壊れているか（problem）を返す。ファイルが無いときは呼ばない
+export const parseRefDefs = (text: string): { defs: RefDef[] | null; problem: string | null } => {
+  const broken = (problem: string) => ({ defs: null, problem })
+  let json: any
+  try {
+    json = JSON.parse(text)
+  } catch (err) {
+    return broken(`JSON として読めない（${String(err)}）`)
+  }
+  if (!json || typeof json !== 'object' || !Array.isArray(json.refs)) return broken('refs（定義の配列）が無い')
+  const defs: RefDef[] = []
+  for (const [i, d] of (json.refs as any[]).entries()) {
+    const where = `refs[${i}]`
+    if (!d || typeof d !== 'object') return broken(`${where} がオブジェクトでない`)
+    if (typeof d.name !== 'string' || !d.name) return broken(`${where} に name が無い`)
+    if (typeof d.pattern !== 'string' || !d.pattern) return broken(`${where} に pattern が無い`)
+    try {
+      new RegExp(d.pattern)
+    } catch (err) {
+      return broken(`${where} の pattern が正規表現として不正（${String(err)}）`)
+    }
+    if (d.url !== undefined && typeof d.url !== 'string') return broken(`${where} の url が文字列でない`)
+    if (d.track !== undefined && typeof d.track !== 'boolean') return broken(`${where} の track が真偽値でない`)
+    defs.push({ name: d.name, pattern: d.pattern, ...(d.url !== undefined ? { url: d.url } : {}), ...(d.track !== undefined ? { track: d.track } : {}) })
+  }
+  return { defs, problem: null }
+}
+
 // 構造だけを見る。「その差分が発言の正しい読みか」は判定機の仕事
-export const validate = (s: State, diff: Diff): string[] => {
+// defs（参照の定義）を渡されたときは、定義のどれにも合わない参照を突き返す。渡されなければ参照は何でもよい
+export const validate = (s: State, diff: Diff, defs: readonly RefDef[] | null = null): string[] => {
   const problems: string[] = []
   const rel = diff.relation
   if (!rel || !RELATIONS.includes(rel)) problems.push(`relation が不正: ${JSON.stringify(rel)}`)
@@ -113,6 +192,11 @@ export const validate = (s: State, diff: Diff): string[] => {
       if (op.parent && !qids.has(op.parent) && !opened.has(op.parent)) problems.push(`${where}: 親の問い ${JSON.stringify(op.parent)} が存在しない`)
       if (!BY.includes(op.owner ?? 'user')) problems.push(`${where}: owner は user か claude: ${JSON.stringify(op.owner)}`)
       if (op.intent !== undefined && (typeof op.intent !== 'object' || !op.intent?.reading)) problems.push(`${where}: open の intent には reading（読み）が要る`)
+      problems.push(...checkRefs(where, op, defs))
+    } else if (kind === 'ref') {
+      if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: ref の対象 ${JSON.stringify(op.question)} が存在しない`)
+      if (!('refs' in op) && !('local' in op)) problems.push(`${where}: ref には refs か local が要る`)
+      problems.push(...checkRefs(where, op, defs))
     } else if (kind === 'answer') {
       if (!qids.has(op.question) && !opened.has(op.question)) problems.push(`${where}: answer の対象 ${JSON.stringify(op.question)} が存在しない`)
       if (op.by && !cids.has(op.by) && !seenAdded.has(op.by)) problems.push(`${where}: answer の by ${JSON.stringify(op.by)} が存在しない`)
@@ -196,9 +280,21 @@ export const apply = (state: State, diff: Diff): State => {
         break
       }
       case 'open':
-        s.questions.push({ id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user', closed: false, intent: toIntent(op.intent, src) })
+        s.questions.push({
+          id: op.id, question: op.question, opened_by: src, answers: [], parent: op.parent ?? null, owner: op.owner ?? 'user', closed: false, intent: toIntent(op.intent, src),
+          refs: [...(op.refs ?? [])], local: op.local ?? false,
+        })
         bump(s.counters, op.id)
         break
+      case 'ref': {
+        // refs を渡せば参照を置き換える（[] で外す）、local を渡せば印を置き換える
+        const q = find(s.questions, op.question)
+        if (q) {
+          if ('refs' in op) q.refs = [...op.refs]
+          if ('local' in op) q.local = op.local
+        }
+        break
+      }
       case 'answer': {
         const q = find(s.questions, op.question)
         if (!q) break
@@ -258,10 +354,13 @@ export const replay = (diffs: Diff[], session: string): State => {
 
 // board_update の結果に返す短い要約。全体を返すと毎ターン数千トークンになるので、
 // 次の差分を書くのに要るもの（読み・開いている問い・最近の決定・手順・次の ID）だけにする
-export const renderCompact = (s: State, recent = 8): string => {
+// defs（参照の定義）を渡すと、未登録の作業に〔未登録〕を付ける。参照は定義の有無によらず並べる
+export const renderCompact = (s: State, recent = 8, defs: readonly RefDef[] | null = null): string => {
   const lines: string[] = []
   const open = s.questions.filter(q => !q.closed)
-  lines.push(`開いている作業: ${open.length ? open.map(q => `${q.id} ${q.question}${q.intent ? `〔意図：${q.intent.reading}〕` : '〔意図なし〕'}`).join(' ／ ') : 'なし'}`)
+  const unreg = new Set(unregistered(s, defs))
+  const refs = (q: Question) => `${q.refs?.length ? `〔参照：${q.refs.join(' ')}〕` : ''}${unreg.has(q.id) ? '〔未登録〕' : ''}`
+  lines.push(`開いている作業: ${open.length ? open.map(q => `${q.id} ${q.question}${refs(q)}${q.intent ? `〔意図：${q.intent.reading}〕` : '〔意図なし〕'}`).join(' ／ ') : 'なし'}`)
   const tail = s.commitments.slice(-recent)
   lines.push(`最近の決定（全 ${s.commitments.length} 件中 ${tail.length} 件）:`)
   for (const c of tail) lines.push(`- ${c.id}${c.by === 'claude' ? '（補完）' : ''} ${c.content}`)
@@ -314,7 +413,8 @@ export const render = (s: State): string => {
   return lines.join('\n')
 }
 
-export const board = (s: State, recent = 3): Board => {
+// defs（参照の定義）は、作業の参照に名前と URL を付けるのと、未登録の作業（unregistered）を出すのに使う
+export const board = (s: State, recent = 3, defs: readonly RefDef[] | null = null): Board => {
   const item = (c: Commitment) => ({ id: c.id, content: c.content, source: c.source, turn: c.turn ?? 0, ...(c.reason ? { reason: c.reason } : {}) })
   return {
     turn: s.turn,
@@ -325,14 +425,15 @@ export const board = (s: State, recent = 3): Board => {
     steps: s.steps.map(st => ({ ...st })),
     open: [...s.questions].reverse().filter(q => !q.closed).map(q => ({ id: q.id, question: q.question, owner: q.owner, parent: q.parent })),
     tree: tree(s),
-    tasks: tasks(s),
+    tasks: tasks(s, defs),
+    unregistered: unregistered(s, defs),
   }
 }
 
 // 作業（問い）の木。各作業に意図と、ぶら下がる決まったこと（親との線の種類つき）を持つ。
 // 決まったことの親：同じ作業の中で depends_on の先頭に当たるものがあればその下（線は rel、無ければ「補足」）、
 // 無ければ作業の直下（線は「答え」）。並びは開いた順・足した順。
-export const tasks = (s: State): Board['tasks'] => {
+export const tasks = (s: State, defs: readonly RefDef[] | null = null): Board['tasks'] => {
   const t = tree(s)
   const where = new Map(t.nodes.flatMap(n => n.items.map(id => [id, n.id] as const)))
   return t.nodes.map((n, i) => ({
@@ -350,6 +451,8 @@ export const tasks = (s: State): Board['tasks'] => {
         ...(c.replaces ? { replaces: c.replaces.content } : {}),
       }
     }),
+    refs: (s.questions[i]!.refs ?? []).map(r => resolveRef(r, defs)),
+    local: !!s.questions[i]!.local,
   }))
 }
 

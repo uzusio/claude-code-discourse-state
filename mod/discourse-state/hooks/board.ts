@@ -1,4 +1,4 @@
-import type { Board, Flag, Task, TaskItem } from '../types'
+import type { Board, Flag, Task, TaskItem, TaskRef } from '../types'
 
 // 記録の置き場の元になる Claude の設定フォルダ：CLAUDE_CONFIG_DIR、無ければ <ホーム>/.claude（ホームは USERPROFILE、無ければ HOME）
 // 一時フォルダはクリーンアップで消えるので使わない。決められないときは黙って別の場所に落とさず投げる
@@ -12,6 +12,15 @@ export const recordsBase = (env: { CLAUDE_CONFIG_DIR?: string; USERPROFILE?: str
 // board.json の置き場：<Claude の設定フォルダ>/discourse-state/<セッション id>/board.json
 export const boardPath = (base: string, sessionId: string) =>
   `${base.replace(/[\\/]+$/, '')}/discourse-state/${sessionId}/board.json`
+
+// 参照の定義ファイル（.claude/discourse-state.json）を探す場所：セッションの作業フォルダから上へ、根まで（近い順）
+// 作業場の中に公開リポジトリがある形でも、どちらの .claude に置いても見つかる
+export const refDefsPaths = (cwd: string): string[] => {
+  const parts = cwd.replace(/[\\/]+$/, '').split(/[\\/]/)
+  const out: string[] = []
+  for (let n = parts.length; n > 0; n--) out.push(`${parts.slice(0, n).join('/')}/.claude/discourse-state.json`)
+  return out
+}
 
 // 書きかけ・壊れたファイルは null（描かない）
 export const parseBoard = (text: string | undefined): Board | null => {
@@ -84,6 +93,8 @@ export type Item = {
   tone?: 'supplemented' | 'dim' | 'new' | 'quote' | 'strong' | 'flagged' | 'task' | 'label'
   indent?: number                  // 字下げの段（木の深さ）
   toggle?: { open: boolean }       // 押すと開閉する行（作業の見出し）
+  refs?: TaskRef[]                 // 作業の見出しだけ：作業の参照（参照があるときだけ）
+  unregistered?: true              // 作業の見出しだけ：未登録の作業（そのときだけ）
 }
 export type Section = {
   key: string
@@ -111,6 +122,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
     })
 
   const focus = focusTask(b)
+  const unreg = new Set(b.unregistered ?? [])
   const items: Item[] = []
   const live = b.tasks.filter(t => !t.closed)
   const done = b.tasks.filter(t => t.closed)
@@ -119,7 +131,15 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
   const task = (items: Item[], m: Mode, t: Task, depth: number): void => {
     const key = `t:${t.id}`
     const open = isOpen(key, m.byDefault)
-    items.push({ key, indent: depth, tone: 'task', toggle: { open }, text: t.question })
+    // 見出し：<最初の参照> <作業名>。未登録なら末尾に「（未登録）」。参照も印も無ければ作業名だけ
+    const refs = t.refs ?? []
+    const isUnreg = unreg.has(t.id)
+    items.push({
+      key, indent: depth, tone: 'task', toggle: { open },
+      text: `${refs.length ? `${refs[0]!.ref} ` : ''}${t.question}${isUnreg ? '（未登録）' : ''}`,
+      ...(refs.length ? { refs } : {}),
+      ...(isUnreg ? { unregistered: true as const } : {}),
+    })
     if (!open && !full) return
     const d = depth + 1
 
@@ -185,11 +205,15 @@ export type View = {
   session: string
   cwd: string
   turn: number
-  band: { goal: string; step: string | null; note: string | null }
+  band: { goal: string; step: string | null; note: string | null; unregistered?: number }
   sections: Section[]
 }
 
+// 未登録の作業の件数（帯の末尾の「未登録 N」）
+export const unregisteredCount = (b: Board) => (b.unregistered ?? []).length
+
 // 純粋関数。監査の指摘は入れない（Claude にだけ渡すもの）。帯の goal は切らない
+// band.unregistered（未登録の作業の件数）は 1 件以上のときだけ入れる
 export const view = (
   b: Board,
   meta: { updatedAt: string; session: string; cwd: string; turn: number; note: string | null },
@@ -199,6 +223,9 @@ export const view = (
   session: meta.session,
   cwd: meta.cwd,
   turn: meta.turn,
-  band: { goal: bandLine(b, Number.MAX_SAFE_INTEGER).goal, step: nextStep(b), note: meta.note },
+  band: {
+    goal: bandLine(b, Number.MAX_SAFE_INTEGER).goal, step: nextStep(b), note: meta.note,
+    ...(unregisteredCount(b) ? { unregistered: unregisteredCount(b) } : {}),
+  },
   sections: sections(b, new Set(), [], true),
 })
