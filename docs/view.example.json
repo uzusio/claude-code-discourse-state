@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "updatedAt": "2026-10-08T00:00:00.000Z",
+  "session": "example",
+  "cwd": "C:/work/example",
+  "turn": 2,
+  "band": {
+    "goal": "会話の邪魔をせずに、いまの読みが目に入るようにする",
+    "step": "次：1行目に意図の読み、2行目に次の一歩",
+    "note": null
+  },
+  "sections": [
+    {
+      "key": "tasks",
+      "title": "作業と意図",
+      "items": [
+        {
+          "key": "t:Q0",
+          "indent": 0,
+          "tone": "task",
+          "toggle": {
+            "open": true
+          },
+          "text": "Claude の意図の読みをどう見せるか"
+        },
+        {
+          "key": "t:Q0:reading",
+          "indent": 1,
+          "tone": "strong",
+          "text": "意図：非同期のやりとりの中で、Claude の読みとずれをいつでも見られるようにする"
+        },
+        {
+          "key": "t:Q0:quote:0",
+          "indent": 2,
+          "tone": "quote",
+          "text": "「Claude が自分の意図をどう汲み取っているのか、会話しながら見たい」"
+        },
+        {
+          "key": "t:Q0:quote:1",
+          "indent": 2,
+          "tone": "quote",
+          "text": "「細かい手順は任せる」"
+        },
+        {
+          "key": "t:Q0:quote:2",
+          "indent": 2,
+          "tone": "quote",
+          "text": "「作業の前か後かは関係ない。やりとりは非同期に進めたい」"
+        },
+        {
+          "key": "t:Q0:prev",
+          "indent": 2,
+          "tone": "dim",
+          "text": "前の読み：作業を始める前に、Claude の読みを確かめられるようにする"
+        },
+        {
+          "key": "c:C0",
+          "indent": 1,
+          "tone": "supplemented",
+          "text": "補完：読みはボタンで開くボードに、要点は帯に出す",
+          "sub": [
+            "補った理由：どこに出すかは言われていない。会話を邪魔しない場所を選んだ"
+          ]
+        },
+        {
+          "key": "t:Q0:flow",
+          "indent": 1,
+          "tone": "label",
+          "text": "流れ"
+        },
+        {
+          "key": "t:Q0:p:0",
+          "indent": 2,
+          "text": "1. 帯に意図の読みと次の一歩を出す",
+          "sub": [
+            "会話を止めずに読みのずれに気づける"
+          ]
+        },
+        {
+          "key": "t:Q0:p:1",
+          "indent": 2,
+          "text": "2. ボードに作業ごとの意図・補完・流れを並べる",
+          "sub": [
+            "読みがどこから来たかを確かめられる"
+          ]
+        },
+        {
+          "key": "t:Q0:p:2",
+          "indent": 2,
+          "text": "3. 話しかけて読みを直せるようにする",
+          "sub": [
+            "ずれを見つけたらその場で直せる"
+          ]
+        },
+        {
+          "key": "t:Q1",
+          "indent": 1,
+          "tone": "task",
+          "toggle": {
+            "open": true
+          },
+          "text": "帯に何を出すか"
+        },
+        {
+          "key": "t:Q1:reading",
+          "indent": 2,
+          "tone": "strong",
+          "text": "意図：会話の邪魔をせずに、いまの読みが目に入るようにする"
+        },
+        {
+          "key": "c:C1",
+          "indent": 2,
+          "tone": "supplemented",
+          "text": "補完：プロンプトの上に帯を常に出す",
+          "sub": [
+            "補った理由：常に目に入る場所として選んだ"
+          ]
+        },
+        {
+          "key": "c:C2",
+          "indent": 3,
+          "tone": "supplemented",
+          "text": "補完（条件）：帯は2行まで",
+          "sub": [
+            "補った理由：長いと会話が隠れる"
+          ]
+        },
+        {
+          "key": "t:Q1:flow",
+          "indent": 2,
+          "tone": "label",
+          "text": "流れ"
+        },
+        {
+          "key": "t:Q1:p:0",
+          "indent": 3,
+          "text": "1. 1行目に意図の読み、2行目に次の一歩",
+          "sub": [
+            "2行で読みと行き先が分かる"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
-import { bandLine, boardPath, parseBoard, recordsBase } from '../hooks/board'
+import { bandLine, boardPath, parseBoard, recordsBase, sections, view } from '../hooks/board'
+import type { Board } from '../types'
+import { board, replay } from '../hooks/state'
+import type { Diff } from '../hooks/state'
+import { SELF_BOARD } from './fixtures'
 
 const BOARD = {
   turn: 3,
@@ -68,4 +72,50 @@ test('ボードが無いとき、帯は出さずペインは案内を出す（te
     expect(await band.find({ key: 'supplemented' })).toBeUndefined()
     await band.unmount()
   }
+})
+
+// ---------------------------------------------------------------- full（view.json 用）と view()
+// 作業を全部片付けた板（片付いた作業は既定でたたまれる）
+const closedBoard = (): Board => {
+  const b = structuredClone(SELF_BOARD) as unknown as Board
+  b.tasks = b.tasks.map(t => ({ ...t, closed: true }))
+  b.open = []
+  return b
+}
+const texts = (secs: ReturnType<typeof sections>) => secs.flatMap(s => s.items.map(i => i.text))
+
+test('full=false は今までどおり：片付いた作業の中身は入らない', async () => {
+  const b = closedBoard()
+  const archive = sections(b, new Set()).find(s => s.key === 'archive')
+  expect(archive?.items).toEqual([])
+  expect(sections(b, new Set(), [], false)).toEqual(sections(b, new Set()))
+})
+
+test('full=true は片付いた作業の中身も入り、開閉の既定は変わらない', async () => {
+  const b = closedBoard()
+  const archive = sections(b, new Set(), [], true).find(s => s.key === 'archive')!
+  expect(archive.collapsible?.open).toBe(false)
+  expect(archive.items.length).toBeGreaterThan(0)
+  const head = archive.items.find(i => i.toggle)!
+  expect(head.toggle?.open).toBe(false)
+  expect(archive.items.some(i => i.text.startsWith('意図：'))).toBe(true)
+})
+
+test('full=true でも開いている作業の出力は full=false と同じ', async () => {
+  const b = parseBoard(JSON.stringify(SELF_BOARD))!
+  expect(sections(b, new Set(), [], true)).toEqual(sections(b, new Set()))
+})
+
+test('view() は version 1・meta・帯をそのまま持ち、sections は full 版で goal は切らない', async () => {
+  const b = closedBoard()
+  b.tasks[0]!.intent = { quote: ['q'], source: null, reading: 'あ'.repeat(200) }
+  b.open = [{ id: b.tasks[0]!.id, question: b.tasks[0]!.question, owner: 'claude' } as Board['open'][number]]
+  const meta = { updatedAt: '2026-10-08T00:00:00.000Z', session: 's', cwd: 'C:/x', turn: 7, note: 'ボード未更新' }
+  const v = view(b, meta)
+  expect(v.version).toBe(1)
+  expect(v).toMatchObject({ updatedAt: meta.updatedAt, session: 's', cwd: 'C:/x', turn: 7 })
+  expect(v.band.goal).toBe('あ'.repeat(200))
+  expect(v.band.note).toBe('ボード未更新')
+  expect(v.sections).toEqual(sections(b, new Set(), [], true))
+  expect(texts(v.sections).length).toBeGreaterThan(0)
 })
