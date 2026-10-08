@@ -1,11 +1,19 @@
 {
   "name": "discourse-state",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "意図ボード：Claude がユーザーの意図をどう汲み取っているかを、プロンプトの上の帯とペインに出す",
   "types": "./types/index.d.ts",
   "author": {
     "name": "uzusio"
   },
   "license": "MIT",
-  "repository": "https://github.com/uzusio/claude-code-discourse-state"
+  "repository": "https://github.com/uzusio/claude-code-discourse-state",
+  "userConfig": {
+    "exportView": {
+      "type": "boolean",
+      "title": "view.json を書き出す（試験的）",
+      "description": "外部の表示先が読む見え方の写し（view.json）を、board.json の横に書く。形は変わることがある",
+      "default": false
+    }
+  }
 }

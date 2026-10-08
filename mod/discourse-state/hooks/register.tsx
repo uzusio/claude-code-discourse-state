@@ -23,6 +23,8 @@ const opened = atom({ plugin: 'discourse-state', key: 'opened' } as const, false
 const expanded = atom({ plugin: 'discourse-state', key: 'expanded' } as const, [] as string[])
 
 let dir: string | null = null
+// 設定 exportView（既定 false）。true のときだけ view.json を書く。register で options から受け取る
+let exportView = false
 
 // Esc で閉じる。入力欄の上に出るときは高さを抑える
 // 置けなかったとき（端末の幅など）は理由を出し、pane.jsonl に残す。開いたまま待つので、幅が足りれば後から出る
@@ -62,7 +64,7 @@ async function readDiffs($: EngineInterface): Promise<Diff[]> {
   return text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l) as Diff)
 }
 
-// view.json（ダッシュボードが読む見え方の写し）を書く。契約は Issue #16
+// view.json（外部の表示先が読む見え方の写し）を書く。契約は Issue #16。試験的なので、設定 exportView が true のときだけ呼ぶ
 async function writeView($: EngineInterface, state: State, turn: number, note: string | null) {
   const d = await boardDir($)
   const v = view(board(state), {
@@ -183,11 +185,12 @@ async function applyFromAgent($: EngineInterface, input: Record<string, unknown>
   await $.fs.write(`${d}/board.json`, JSON.stringify(board(next), null, 2))
   await load($, (diff.ops ?? []).some(o => o.op !== 'none'))
   // board.json はもう書けているので、view.json の失敗でツールを失敗にしない（呼び直されると二重に足される）
-  const viewFailed = await writeView($, next, n, null).then(() => '', (err: unknown) => `\n\nview.json を書けなかった：${String(err)}`)
+  const viewFailed = !exportView ? '' : await writeView($, next, n, null).then(() => '', (err: unknown) => `\n\nview.json を書けなかった：${String(err)}`)
   return { text: `ボードを更新した。\n\n${renderCompact(next)}${viewFailed}`, isError: false }
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  exportView = options.exportView === true
 
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'discourse-state', description: '意図ボードを開く・閉じる（Esc でも閉じる）' })
@@ -280,11 +283,13 @@ export const register: Register = on => {
       if (workedThisTurn && !updatedThisTurn) {
         missedLastTurn = true
         await update($, seen, v => ({ ...v, note: 'ボード未更新' }))
-        // ボードがまだ無い（diffs が空）なら書かない
-        await (async () => {
-          const diffs = await readDiffs($)
-          if (diffs.length) await writeView($, replay(diffs, await boardDir($)), await $.session.turns(), 'ボード未更新')
-        })().catch((err: unknown) => $.ui.toast(`view.json を書けなかった：${String(err)}`))
+        // 設定で有効にしたときだけ。ボードがまだ無い（diffs が空）なら書かない
+        if (exportView) {
+          await (async () => {
+            const diffs = await readDiffs($)
+            if (diffs.length) await writeView($, replay(diffs, await boardDir($)), await $.session.turns(), 'ボード未更新')
+          })().catch((err: unknown) => $.ui.toast(`view.json を書けなかった：${String(err)}`))
+        }
       }
       if (workedThisTurn || updatedThisTurn) await runAudit($).catch(() => undefined)
     }

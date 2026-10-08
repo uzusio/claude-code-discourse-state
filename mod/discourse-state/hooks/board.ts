@@ -177,7 +177,7 @@ export const sections = (b: Board, flipped: ReadonlySet<string>, audit: readonly
   return out
 }
 
-// ---------------------------------------------------------------- view.json（ダッシュボードが読む見え方の写し。契約は Issue #16）
+// ---------------------------------------------------------------- view.json（外部の表示先が読む見え方の写し。契約は Issue #16）
 export const VIEW_VERSION = 1
 export type View = {
   version: 1

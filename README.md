@@ -81,6 +81,53 @@ flowchart LR
 
 記録はセッションごとに `<Claude の設定フォルダ>/discourse-state/<セッション id>/`（`CLAUDE_CONFIG_DIR`、無ければ `~/.claude`）に置く。監査は作業のあったターンごとにモデルを1回呼ぶ。
 
+## 試験的：view.json の書き出し
+
+ボードの見え方の写しを、外部の表示先が読めるファイル（`view.json`）として書き出す設定。**既定では書かない**。使わなければ何も変わらない。試験的な機能で、形は予告なく変わることがある。契約は [Issue #16](https://github.com/uzusio/claude-code-discourse-state/issues/16)。
+
+### 有効にする
+
+設定の `pluginConfigs` に `exportView: true` を書く（`~/.claude/settings.json` やプロジェクトの `.claude/settings.json`。キーは入れ方によるプラグイン名で、marketplace から入れたなら次のとおり）。
+
+```json
+{
+  "pluginConfigs": {
+    "discourse-state@claude-code-discourse-state": {
+      "options": { "exportView": true }
+    }
+  }
+}
+```
+
+`--plugin-dir` で読み込んでいるときのキーは `discourse-state`。`/config` の項目「view.json を書き出す（試験的）」からも切り替えられ、変えるとその場で読み込み直される。
+
+### 置き場
+
+`<CLAUDE_CONFIG_DIR か ~/.claude>/discourse-state/<セッション id>/view.json`（`board.json` と同じ場所）。`board_update` を呼んだとき、作業をしたのに更新しなかったターンの終わり（帯の注記は「ボード未更新」）に書き直す。ボードがまだ無いセッションには書かない。
+
+### 形
+
+見本は [`docs/view.example.json`](docs/view.example.json)（`python tools/test.py` が、今の出力と一致しているかを確かめる）。
+
+- `version`：形の版。今は `1`
+- `updatedAt`：書いた時刻（ISO 8601）
+- `session`：セッション id
+- `cwd`：セッションの作業フォルダ
+- `turn`：書いた時点のターン番号
+- `band`：入力欄の上の帯と同じ内容。`goal`（いまの作業の読み。切らずに全文）、`step`（次の一歩。無ければ `null`）、`note`（「ボード未更新」などの注記。無ければ `null`）
+- `sections`：ペインの欄の並び。`key`・`title`・`items` を持ち、片付いた作業の欄は `collapsible.open`（既定の開閉）も持つ。各 `items` は `key`・`text`・`indent`（木の深さ）・`tone`（下記）・`toggle`（作業の見出しだけ。`open` は既定の開閉）を持つ
+- `tone`：行の意味。`task` 作業の見出し、`strong` 意図の読み、`quote` ユーザーの言葉、`supplemented` 補った前提、`dim` 前の読みなど控えめにする行、`label` 「流れ」などの小見出し。欄の `tone`（`dim` など）は、欄全体の控えめさを表す。読む側は知らない `tone` を既定の見た目で描く
+- `toggle` と `indent`：`toggle` を持つ行が作業の見出しで、`indent` が大きい行は直前の見出しの下にぶら下がる。見出しを開閉の対象として、`indent` が見出しより深い間の行を畳める
+- 閉じた作業・片付いた作業の中身も入っている。畳むかどうかは書き出し側が決めず、`toggle.open` と `collapsible.open` で既定を示すだけ。読む側が決める
+- 監査の指摘は入れない（Claude にだけ渡すもの）
+
+### 互換性の方針
+
+- 項目を足すだけなら `version` は `1` のまま。読む側は知らない項目を無視する
+- 形を壊す変更では `version` を上げる。読む側は知らない版を描かず、知らせる
+- 0.2.0 以前は書かない。読む側はファイルが無いことを想定する
+- 試験的なので、形は予告なく変わることがある
+
 ## 背景
 
 談話意味論の枠組みのうち、読みの精度に効く部分だけを使っている。

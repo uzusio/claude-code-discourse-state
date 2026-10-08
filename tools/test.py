@@ -1,7 +1,7 @@
 """Python 版（poc）と mod のテストを回し、結果を JUnit XML 1つにまとめる。
 
 使い方（リポジトリの直下で）: python tools/test.py
-出力: test-results/junit.xml（進捗ダッシュボードの test-results が読む）。どちらかが失敗すれば終了コード 1。
+出力: test-results/junit.xml（外部の表示先が読む）。どちらかが失敗すれば終了コード 1。
 """
 import os
 import re
