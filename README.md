@@ -87,19 +87,21 @@ flowchart LR
 
 ### 有効にする
 
-設定の `pluginConfigs` に `exportView: true` を書く（`~/.claude/settings.json` やプロジェクトの `.claude/settings.json`。キーは入れ方によるプラグイン名で、marketplace から入れたなら次のとおり）。
+`/config` の項目「view.json を書き出す（試験的）」をオンにする。変えるとその場で読み込み直され、次に `board_update` が呼ばれたときから書く。
+
+設定は `~/.claude/settings.json` の `pluginConfigs` に、入れ方で決まる名前で保存される。手で書くときは次の形にする（名前は、プロジェクトの `.claude/skills/` から読み込んでいるなら `discourse-state@skills-dir`）。
 
 ```json
 {
   "pluginConfigs": {
-    "discourse-state@claude-code-discourse-state": {
+    "discourse-state@skills-dir": {
       "options": { "exportView": true }
     }
   }
 }
 ```
 
-`--plugin-dir` で読み込んでいるときのキーは `discourse-state`。`/config` の項目「view.json を書き出す（試験的）」からも切り替えられ、変えるとその場で読み込み直される。
+名前を間違えると何も起きず、エラーも出ない。迷ったら `/config` から切り替える。
 
 ### 置き場
 
