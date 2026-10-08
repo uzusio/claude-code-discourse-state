@@ -1,2 +1,0 @@
-# 見本はテスト（tools/render-view.ts --check）がバイト単位で比べるので、Windows の取り出しでも改行を LF のままにする
-docs/view.example.json text eol=lf

@@ -2,12 +2,12 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteResult, Register } from 'claude-code'
 
 import type { Seen } from '../types'
-import { bandLine, boardPath, nextStep, parseBoard, recordsBase, sections, view } from './board'
+import { bandLine, boardPath, nextStep, parseBoard, recordsBase, sections } from './board'
 import type { Item } from './board'
 import { apply, board, RELATIONS, renderCompact, renderIds, replay, validate } from './state'
 import { buildDeviationPrompt, DEVIATION_SYSTEM, lastExchange, parseDeviation } from './audit'
 import type { Audit, Flag } from './audit'
-import type { Diff, State } from './state'
+import type { Diff } from './state'
 
 const PANE = 'discourse-state'
 const TITLE = '意図ボード'
@@ -60,15 +60,6 @@ async function readDiffs($: EngineInterface): Promise<Diff[]> {
   const text = await readText($, `${await boardDir($)}/diffs.jsonl`)
   if (!text) return []
   return text.split(/\r?\n/).filter(l => l.trim()).map(l => JSON.parse(l) as Diff)
-}
-
-// view.json（ダッシュボードが読む見え方の写し）を書く。契約は Issue #16
-async function writeView($: EngineInterface, state: State, turn: number, note: string | null) {
-  const d = await boardDir($)
-  const v = view(board(state), {
-    updatedAt: new Date().toISOString(), session: await $.session.id(), cwd: await $.session.cwd(), turn, note,
-  })
-  await $.fs.write(`${d}/view.json`, JSON.stringify(v, null, 2))
 }
 
 // board.json を読み直す。読めない・壊れているときはボードなし
@@ -182,9 +173,7 @@ async function applyFromAgent($: EngineInterface, input: Record<string, unknown>
   await $.fs.write(`${d}/diffs.jsonl`, [...diffs, diff].map(x => JSON.stringify(x)).join('\n') + '\n')
   await $.fs.write(`${d}/board.json`, JSON.stringify(board(next), null, 2))
   await load($, (diff.ops ?? []).some(o => o.op !== 'none'))
-  // board.json はもう書けているので、view.json の失敗でツールを失敗にしない（呼び直されると二重に足される）
-  const viewFailed = await writeView($, next, n, null).then(() => '', (err: unknown) => `\n\nview.json を書けなかった：${String(err)}`)
-  return { text: `ボードを更新した。\n\n${renderCompact(next)}${viewFailed}`, isError: false }
+  return { text: `ボードを更新した。\n\n${renderCompact(next)}`, isError: false }
 }
 
 export const register: Register = on => {
@@ -280,11 +269,6 @@ export const register: Register = on => {
       if (workedThisTurn && !updatedThisTurn) {
         missedLastTurn = true
         await update($, seen, v => ({ ...v, note: 'ボード未更新' }))
-        // ボードがまだ無い（diffs が空）なら書かない
-        await (async () => {
-          const diffs = await readDiffs($)
-          if (diffs.length) await writeView($, replay(diffs, await boardDir($)), await $.session.turns(), 'ボード未更新')
-        })().catch((err: unknown) => $.ui.toast(`view.json を書けなかった：${String(err)}`))
       }
       if (workedThisTurn || updatedThisTurn) await runAudit($).catch(() => undefined)
     }

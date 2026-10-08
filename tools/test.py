@@ -77,13 +77,6 @@ def mod_suite() -> ET.Element:
     return _suite("mod (TypeScript)", cases)
 
 
-def view_example_suite() -> ET.Element:
-    """docs/view.example.json が今の view() の出力と一致するか（見本が古くならない）。claude plugin test のテストはファイルを読めないので、ここで回す。"""
-    p = subprocess.run(["npx", "-y", "tsx", "tools/render-view.ts", "--check"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", shell=os.name == "nt")
-    detail = None if p.returncode == 0 else (p.stdout + p.stderr).strip() or "失敗"
-    return _suite("view.example.json", [("tools/render-view.ts", "docs/view.example.json は今の view() の出力と一致する", 0.0, "failure" if detail else None, detail)])
-
-
 def _suite(name: str, cases) -> ET.Element:
     s = ET.Element("testsuite", name=name, tests=str(len(cases)),
                    failures=str(sum(1 for c in cases if c[3] == "failure")),
@@ -98,7 +91,7 @@ def _suite(name: str, cases) -> ET.Element:
 
 def main() -> int:
     root = ET.Element("testsuites")
-    suites = [python_suite(), mod_suite(), view_example_suite()]
+    suites = [python_suite(), mod_suite()]
     root.extend(suites)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     ET.ElementTree(root).write(OUT, encoding="utf-8", xml_declaration=True)
